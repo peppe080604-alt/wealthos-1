@@ -1,0 +1,1502 @@
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import {
+  PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip,
+  ResponsiveContainer, LineChart, Line, CartesianGrid, Area, AreaChart, Legend, ReferenceLine
+} from "recharts";
+
+// ═══════════════════════════════════════════════════════
+// DESIGN TOKENS
+// ═══════════════════════════════════════════════════════
+const T = {
+  indigo:"#6366f1", indigoL:"#818cf8", indigoD:"#4f46e5",
+  cyan:"#22d3ee", cyanL:"#67e8f9",
+  amber:"#f59e0b", amberL:"#fcd34d",
+  green:"#10b981", greenL:"#34d399",
+  red:"#f43f5e", redL:"#fb7185",
+  violet:"#a78bfa", orange:"#fb923c", pink:"#e879f9",
+  slate200:"#e2e8f0", slate300:"#cbd5e1", slate400:"#94a3b8",
+  slate500:"#64748b", slate600:"#475569", slate700:"#334155",
+  slate800:"#1e293b", slate850:"#172033", slate900:"#0f172a", slate950:"#080d17",
+};
+const COLORS = [T.indigo,T.cyan,T.amber,T.green,T.red,T.violet,T.orange,T.pink,"#34d399","#f97316"];
+const CATEGORIE = ["Cibo","Trasporti","Casa","Svago","Salute","Abbigliamento","Altro"];
+const CAT_EMOJI = {Cibo:"🍔",Trasporti:"🚗",Casa:"🏠",Svago:"🎮",Salute:"💊",Abbigliamento:"👗",Altro:"📦"};
+const MESI = ["Gen","Feb","Mar","Apr","Mag","Giu","Lug","Ago","Set","Ott","Nov","Dic"];
+
+const CSS_GLOBAL=`
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+  @keyframes slideIn{from{transform:translateY(10px);opacity:0}to{transform:translateY(0);opacity:1}}
+  @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-7px)}}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.65}}
+  @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+  *{box-sizing:border-box;}
+  ::-webkit-scrollbar{width:4px;height:4px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+  ::-webkit-scrollbar-thumb{background:rgba(99,102,241,0.22);border-radius:99px;}
+  select option{background:#1e293b;}
+  input:focus,select:focus{border-color:rgba(99,102,241,0.48)!important;box-shadow:0 0 0 3px rgba(99,102,241,0.1);}
+`;
+const TICKER_SUGGERITI = [
+  {ticker:"VWCE.DE",nome:"Vanguard FTSE All-World",tipo:"ETF"},
+  {ticker:"EUNL.DE",nome:"iShares Core MSCI World",tipo:"ETF"},
+  {ticker:"CSPX.L",nome:"iShares S&P 500",tipo:"ETF"},
+  {ticker:"BTC-USD",nome:"Bitcoin",tipo:"Crypto"},
+  {ticker:"ETH-USD",nome:"Ethereum",tipo:"Crypto"},
+];
+const DEMO_SPESE = [
+  {id:1,desc:"Supermercato",importo:87.50,categoria:"Cibo",data:"2026-05-01",tags:["#spesa"],ricorrente:false},
+  {id:2,desc:"Netflix",importo:15.99,categoria:"Svago",data:"2026-05-02",tags:["#subscription"],ricorrente:true},
+  {id:3,desc:"Carburante",importo:60.00,categoria:"Trasporti",data:"2026-05-03",tags:["#auto"],ricorrente:false},
+  {id:4,desc:"Affitto",importo:700.00,categoria:"Casa",data:"2026-05-05",tags:["#affitto"],ricorrente:true},
+  {id:5,desc:"Farmacia",importo:23.40,categoria:"Salute",data:"2026-05-07",tags:[],ricorrente:false},
+  {id:6,desc:"Ristorante Sushi",importo:45.00,categoria:"Cibo",data:"2026-05-10",tags:["#ristorante"],ricorrente:false},
+  {id:7,desc:"Spotify",importo:10.99,categoria:"Svago",data:"2026-05-12",tags:["#subscription"],ricorrente:true},
+  {id:8,desc:"Delivery Glovo",importo:32.50,categoria:"Cibo",data:"2026-05-16",tags:["#delivery"],ricorrente:false},
+  {id:9,desc:"Treno",importo:18.00,categoria:"Trasporti",data:"2026-05-18",tags:[],ricorrente:false},
+  {id:10,desc:"Palestra",importo:40.00,categoria:"Salute",data:"2026-05-20",tags:["#subscription"],ricorrente:true},
+];
+const ACHIEVEMENTS = [
+  {id:"first_spesa",icon:"💸",title:"Prima Spesa",check:(s)=>s.length>0},
+  {id:"first_etf",icon:"📈",title:"Primo ETF",check:(s,c,a)=>a.length>0},
+  {id:"fondo_50",icon:"🛡️",title:"Metà Fondo",check:(s,c)=>c.fondoEmergenza.obiettivo>0&&(c.fondoEmergenza.attuale/c.fondoEmergenza.obiettivo)>=0.5},
+  {id:"fondo_100",icon:"🏆",title:"Fondo OK",check:(s,c)=>c.fondoEmergenza.obiettivo>0&&c.fondoEmergenza.attuale>=c.fondoEmergenza.obiettivo},
+  {id:"pac_on",icon:"🌱",title:"PAC Attivo",check:(s,c)=>c.pac.mensile>0},
+  {id:"budget_hero",icon:"⭐",title:"Budget Hero",check:(s,c)=>{const oggi=new Date();const tot=s.filter(x=>{const d=new Date(x.data);return d.getMonth()===oggi.getMonth()&&d.getFullYear()===oggi.getFullYear();}).reduce((a,x)=>a+x.importo,0);return c.stipendio>0&&tot<c.stipendio*0.5;}},
+  {id:"diversified",icon:"🌍",title:"Diversificato",check:(s,c,a)=>a.length>=3},
+  {id:"no_debt",icon:"✅",title:"Zero Debiti",check:(s,c)=>!c.debiti||c.debiti===0},
+];
+
+// ═══════════════════════════════════════════════════════
+// UTILS
+// ═══════════════════════════════════════════════════════
+const fmt  = v=>`€${Number(v).toLocaleString("it-IT",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+const fmtK = v=>Math.abs(v)>=1000?`€${(v/1000).toFixed(1)}k`:fmt(v);
+const fmtP = v=>`${v>=0?"+":""}${Number(v).toFixed(1)}%`;
+const clamp= (v,mn,mx)=>Math.min(Math.max(v,mn),mx);
+
+const storage = {
+  save: async(k,v)=>{try{await window.storage.set(k,JSON.stringify(v));}catch{}},
+  load: async(k,fb)=>{try{const r=await window.storage.get(k);if(r)return JSON.parse(r.value);}catch{}return fb;},
+};
+
+// ═══════════════════════════════════════════════════════
+// FINANCIAL CALCS
+// ═══════════════════════════════════════════════════════
+function calcHealthScore(cfg,spese,assets,prezzi){
+  const oggi=new Date(),meseC=oggi.getMonth(),annoC=oggi.getFullYear();
+  const speseMese=spese.filter(s=>{const d=new Date(s.data);return d.getFullYear()===annoC&&d.getMonth()===meseC;}).reduce((a,s)=>a+s.importo,0);
+  const percSpesa=cfg.stipendio>0?(speseMese/cfg.stipendio)*100:100;
+  const percFondo=cfg.fondoEmergenza.obiettivo>0?clamp((cfg.fondoEmergenza.attuale/cfg.fondoEmergenza.obiettivo)*100,0,100):0;
+  const mesiCop=cfg.stipendio>0?cfg.liquidita/cfg.stipendio:0;
+  const percPac=cfg.pac.obiettivo>0?clamp((cfg.pac.attuale/cfg.pac.obiettivo)*100,0,100):0;
+  const totPort=assets.reduce((s,a)=>{const p=prezzi[a.ticker];if(!p)return s;return s+a.quantita*p.prezzo*(p.valuta==="USD"?1/1.08:1);},0);
+  const cryptoVal=assets.filter(a=>a.tipo==="Crypto").reduce((s,a)=>{const p=prezzi[a.ticker];if(!p)return s;return s+a.quantita*p.prezzo*(p.valuta==="USD"?1/1.08:1);},0);
+  const cryptoPerc=totPort>0?(cryptoVal/totPort)*100:0;
+  const scores={
+    fondo:Math.round(percFondo*0.2),
+    risparmio:Math.round(clamp(100-percSpesa,0,100)*0.2),
+    liquidita:Math.round(clamp(mesiCop/6,0,1)*15),
+    pac:Math.round(percPac*0.1+(cfg.pac.mensile>0?10:0)),
+    diversificazione:(assets.length>=3?5:0)+(assets.filter(a=>a.tipo==="ETF").length>=2?5:0)+(cryptoPerc<30?5:0),
+    debiti:cfg.debiti>0?Math.round(clamp(1-(cfg.debiti/(cfg.stipendio*12)),0,1)*10):10,
+  };
+  const spiegazioni={
+    fondo:percFondo<100?`+${Math.round((1-percFondo/100)*20)} punti completando il fondo emergenza`:"✅ Fondo emergenza completo",
+    risparmio:percSpesa>30?`+${Math.round((percSpesa-30)*0.2)} punti riducendo le spese al 30%`:"✅ Risparmio ottimale",
+    liquidita:mesiCop<3?`+${Math.round((3-mesiCop)/6*15)} punti con 3 mesi di liquidità`:"✅ Liquidità sufficiente",
+    pac:cfg.pac.mensile===0?"+10 punti avviando un PAC mensile":"✅ PAC attivo",
+    diversificazione:assets.length<3?`+${15-scores.diversificazione} punti diversificando il portfolio`:"✅ Portfolio diversificato",
+    debiti:cfg.debiti>0?"Riduci i debiti per migliorare lo score":"✅ Nessun debito",
+  };
+  return{total:clamp(Object.values(scores).reduce((a,b)=>a+b,0),0,100),breakdown:scores,spiegazioni};
+}
+
+function calcInsights(spese,stipendio){
+  const insights=[];
+  const oggi=new Date(),meseC=oggi.getMonth(),annoC=oggi.getFullYear();
+  const pm=meseC===0?11:meseC-1,pa=meseC===0?annoC-1:annoC;
+  const sm=cat=>spese.filter(x=>{const d=new Date(x.data);return d.getFullYear()===annoC&&d.getMonth()===meseC&&(cat?x.categoria===cat:true);}).reduce((a,x)=>a+x.importo,0);
+  const sp=cat=>spese.filter(x=>{const d=new Date(x.data);return d.getFullYear()===pa&&d.getMonth()===pm&&(cat?x.categoria===cat:true);}).reduce((a,x)=>a+x.importo,0);
+  CATEGORIE.forEach(cat=>{
+    const curr=sm(cat),prev=sp(cat);
+    if(prev>0&&curr>0){
+      const delta=((curr-prev)/prev)*100;
+      if(delta>30) insights.push({tipo:"warning",emoji:CAT_EMOJI[cat]||"📈",testo:`Spese ${cat} +${delta.toFixed(0)}% vs mese scorso`,risparmio:Math.round((curr-prev)*0.5),pattern:"Aumento anomalo",impatto:`Risparmio potenziale: ${fmt(Math.round((curr-prev)*0.5))}/mese`});
+      if(delta<-20) insights.push({tipo:"positive",emoji:"✅",testo:`Spese ${cat} -${Math.abs(delta).toFixed(0)}%! Ottimo lavoro.`,risparmio:0,pattern:"Riduzione spese",impatto:"Continua così!"});
+    }
+  });
+  const delivery=spese.filter(s=>s.tags&&s.tags.includes("#delivery")).reduce((a,s)=>a+s.importo,0);
+  if(delivery>0&&stipendio>0&&delivery/stipendio>0.08) insights.push({tipo:"warning",emoji:"🛵",testo:`${fmt(delivery)} in delivery (${((delivery/stipendio)*100).toFixed(0)}% stipendio)`,risparmio:Math.round(delivery*0.4),pattern:"Spesa impulsiva",impatto:`Cucinare 2x/sett = ${fmt(Math.round(delivery*0.4))}/mese risparmiati`});
+  const subs=spese.filter(s=>s.ricorrente);
+  if(subs.length>=3) insights.push({tipo:"info",emoji:"📱",testo:`${subs.length} abbonamenti attivi: ${fmt(subs.reduce((a,s)=>a+s.importo,0))}/mese`,risparmio:0,pattern:"Subscription stack",impatto:"Valuta quali usi davvero"});
+  if(insights.length===0) insights.push({tipo:"positive",emoji:"🎉",testo:"Nessuna anomalia! Profilo spese sano.",risparmio:0,pattern:"Tutto regolare",impatto:"Mantieni il ritmo"});
+  return insights.slice(0,6);
+}
+
+function calcForecast(cfg,spese){
+  const oggi=new Date(),meseC=oggi.getMonth(),annoC=oggi.getFullYear(),giorno=oggi.getDate();
+  const speseMese=spese.filter(s=>{const d=new Date(s.data);return d.getFullYear()===annoC&&d.getMonth()===meseC;}).reduce((a,s)=>a+s.importo,0);
+  const mediaG=giorno>0?speseMese/giorno:0;
+  const saldoOra=cfg.liquidita-speseMese;
+  const s30=saldoOra+cfg.stipendio-(mediaG*30);
+  const s60=s30+cfg.stipendio-(mediaG*30);
+  const s90=s60+cfg.stipendio-(mediaG*30)-cfg.pac.mensile*3;
+  return{saldoOra,saldo30:s30,saldo60:s60,saldo90:s90,
+    giornoRischio:mediaG>0?Math.floor(saldoOra/mediaG):999,mediaGiornaliera:mediaG,
+    chart:[{periodo:"Oggi",saldo:Math.round(saldoOra)},{periodo:"30gg",saldo:Math.round(s30)},{periodo:"60gg",saldo:Math.round(s60)},{periodo:"90gg",saldo:Math.round(s90)}]};
+}
+
+function calcFIRE(cfg){
+  const{eta=30,capitaleAttuale=0,pacMensile=100,rendimentoAtteso=7,renditaDesiderata=1500,swr=4}=cfg.fire||{};
+  const r=rendimentoAtteso/100/12,capNec=(renditaDesiderata*12)/(swr/100);
+  let capitale=capitaleAttuale,mesi=0;
+  while(capitale<capNec&&mesi<600){capitale=capitale*(1+r)+pacMensile;mesi++;}
+  const chart=[];let cap=capitaleAttuale;
+  for(let m=0;m<=Math.min(mesi+60,480);m+=12){chart.push({anno:Math.round(eta+m/12),capitale:Math.round(cap),target:Math.round(capNec)});for(let j=0;j<12;j++)cap=cap*(1+r)+pacMensile;}
+  const milestones=[25000,50000,100000,250000,capNec].filter((v,i,a)=>a.indexOf(v)===i).sort((a,b)=>a-b).slice(0,5).map(t=>{let c2=capitaleAttuale,ms=0;while(c2<t&&ms<600){c2=c2*(1+r)+pacMensile;ms++;}return{target:t,anni:Math.round(ms/12*10)/10,raggiunto:capitaleAttuale>=t};});
+  return{etaPensione:Math.round((eta+mesi/12)*10)/10,capitaleFinale:Math.round(capitale),renditaMensile:Math.round((capitale*(swr/100))/12),capitaleNecessario:Math.round(capNec),mesi,prob:mesi<600?clamp(100-(mesi>480?20:0),60,100):0,chart,milestones};
+}
+
+function calcBudget(stipendio,spese){
+  const oggi=new Date(),meseC=oggi.getMonth(),annoC=oggi.getFullYear();
+  const sm=cat=>spese.filter(s=>{const d=new Date(s.data);return d.getFullYear()===annoC&&d.getMonth()===meseC&&(cat?s.categoria===cat:true);}).reduce((a,s)=>a+s.importo,0);
+  const tot=sm(null);
+  return{necessita:{budget:stipendio*0.5,speso:sm("Casa")+sm("Cibo")+sm("Trasporti")+sm("Salute")},desideri:{budget:stipendio*0.3,speso:sm("Svago")+sm("Abbigliamento")},risparmio:{budget:stipendio*0.2,speso:Math.max(0,stipendio-tot)},totale:tot};
+}
+
+function calcPAC(attuale,mensile,rendimento,anni){
+  const r=rendimento/100/12;const punti=[];let cap=attuale;
+  for(let m=1;m<=anni*12;m++){cap=cap*(1+r)+mensile;if(m%12===0||m===1)punti.push({anno:m/12,conInteressi:Math.round(cap),senzaInteressi:Math.round(attuale+mensile*m)});}
+  return punti;
+}
+
+function calcSparkline(spese,mesi=6){
+  const oggi=new Date();
+  return Array.from({length:mesi},(_,i)=>{
+    const offset=mesi-1-i;
+    const m=(oggi.getMonth()-offset+12)%12;
+    const y=oggi.getFullYear()+(oggi.getMonth()-offset<0?-1:0);
+    return spese.filter(s=>{const d=new Date(s.data);return d.getMonth()===m&&d.getFullYear()===y;}).reduce((a,s)=>a+s.importo,0);
+  });
+}
+
+function calcHeatmap(spese){
+  const oggi=new Date(),anno=oggi.getFullYear(),mese=oggi.getMonth();
+  const giorni=new Date(anno,mese+1,0).getDate();
+  return Array.from({length:giorni},(_,i)=>{
+    const g=i+1;
+    const tot=spese.filter(s=>{const d=new Date(s.data);return d.getFullYear()===anno&&d.getMonth()===mese&&d.getDate()===g;}).reduce((a,s)=>a+s.importo,0);
+    return{giorno:g,tot};
+  });
+}
+
+async function fetchPrezzo(ticker){
+  try{
+    const r=await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d`);
+    const d=await r.json();const meta=d?.chart?.result?.[0]?.meta;if(!meta)return null;
+    return{prezzo:meta.regularMarketPrice||meta.previousClose||0,valuta:meta.currency||"USD",nome:meta.shortName||ticker,variazione:meta.regularMarketChangePercent||0};
+  }catch{return null;}
+}
+
+async function callAI(sys,usr){
+  const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,system:sys,messages:[{role:"user",content:usr}]})});
+  const d=await res.json();return d.content?.[0]?.text||"";
+}
+
+// ═══════════════════════════════════════════════════════
+// HOOKS
+// ═══════════════════════════════════════════════════════
+function useCountUp(target,dur=1100){
+  const[val,setVal]=useState(0);
+  const t=typeof target==="number"?target:0;
+  useEffect(()=>{
+    let start=null;
+    const step=ts=>{if(!start)start=ts;const p=Math.min((ts-start)/dur,1);const e=1-Math.pow(1-p,3);setVal(Math.round(t*e));if(p<1)requestAnimationFrame(step);};
+    if(t>0)requestAnimationFrame(step); else setVal(0);
+  },[t]);
+  return val;
+}
+function useHover(){const[h,sH]=useState(false);return[h,{onMouseEnter:()=>sH(true),onMouseLeave:()=>sH(false)}];}
+
+// ═══════════════════════════════════════════════════════
+// DESIGN SYSTEM
+// ═══════════════════════════════════════════════════════
+const IS={background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:10,padding:"10px 14px",color:T.slate200,fontSize:14,outline:"none",width:"100%",boxSizing:"border-box",fontFamily:"inherit",transition:"border-color 0.2s"};
+const BS={border:"none",borderRadius:10,padding:"11px 24px",color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer",letterSpacing:0.3,transition:"all 0.18s",fontFamily:"inherit"};
+const TT={background:T.slate800,border:"1px solid rgba(255,255,255,0.1)",borderRadius:10,color:T.slate200,fontSize:12,boxShadow:"0 8px 32px rgba(0,0,0,0.5)"};
+
+function Card({children,accent,glow,style={},onClick}){
+  const[hv,hp]=useHover();
+  return(
+    <div onClick={onClick} {...hp} style={{background:accent?`${accent}0d`:"rgba(255,255,255,0.025)",borderRadius:16,padding:20,border:`1px solid ${accent?(hv?`${accent}55`:`${accent}28`):(hv?"rgba(255,255,255,0.11)":"rgba(255,255,255,0.07)")}`,transition:"all 0.2s",boxShadow:hv&&glow?`0 0 28px ${glow}28`:"none",cursor:onClick?"pointer":"default",...style}}>
+      {children}
+    </div>
+  );
+}
+
+function KPICard({label,value,color=T.indigo,sub,trend,sparkData,icon}){
+  const[hv,hp]=useHover();
+  const numVal=typeof value==="number"?value:0;
+  const animated=useCountUp(numVal);
+  return(
+    <div {...hp} style={{background:"rgba(255,255,255,0.03)",borderRadius:14,padding:"16px 18px",border:`1px solid ${hv?`${color}45`:`${color}20`}`,position:"relative",overflow:"hidden",transition:"all 0.22s",boxShadow:hv?`0 4px 20px ${color}1a`:"none"}}>
+      <div style={{position:"absolute",inset:0,background:`radial-gradient(ellipse at top right,${color}07,transparent)`,pointerEvents:"none"}}/>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:4}}>
+        <div style={{color:T.slate500,fontSize:10,fontWeight:600,letterSpacing:0.6,textTransform:"uppercase"}}>{icon&&<span style={{marginRight:4}}>{icon}</span>}{label}</div>
+        {trend!==undefined&&trend!==null&&<div style={{display:"flex",alignItems:"center",gap:2,background:trend>=0?`${T.green}18`:`${T.red}18`,borderRadius:5,padding:"1px 6px",fontSize:10,color:trend>=0?T.green:T.red,fontWeight:700}}>{trend>=0?"↑":"↓"}{Math.abs(trend).toFixed(1)}%</div>}
+      </div>
+      <div style={{color,fontWeight:800,fontSize:19,lineHeight:1.2,fontVariantNumeric:"tabular-nums"}}>
+        {typeof value==="number"?`€${animated.toLocaleString("it-IT")}`:value}
+      </div>
+      {sub&&<div style={{color:T.slate600,fontSize:11,marginTop:3}}>{sub}</div>}
+      {sparkData&&sparkData.length>1&&(
+        <div style={{marginTop:8,height:28}}>
+          <ResponsiveContainer width="100%" height={28}>
+            <AreaChart data={sparkData.map((v,i)=>({i,v}))} margin={{top:2,right:0,left:0,bottom:0}}>
+              <defs><linearGradient id={`sg${label.replace(/\s/g,"")}`} x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={color} stopOpacity={0.35}/><stop offset="95%" stopColor={color} stopOpacity={0}/></linearGradient></defs>
+              <Area type="monotone" dataKey="v" stroke={color} strokeWidth={1.5} fill={`url(#sg${label.replace(/\s/g,"")})`} dot={false}/>
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProgressBar({value,max,color=T.indigo,height=10,showPct=false}){
+  const pct=Math.min((value/Math.max(max,1))*100,100);
+  return(
+    <div>
+      <div style={{background:"rgba(255,255,255,0.07)",borderRadius:99,height,overflow:"hidden",marginTop:8}}>
+        <div style={{width:`${pct}%`,height:"100%",borderRadius:99,background:`linear-gradient(90deg,${color}88,${color})`,transition:"width 0.9s cubic-bezier(.4,0,.2,1)",boxShadow:`0 0 10px ${color}40`}}/>
+      </div>
+      {showPct&&<div style={{textAlign:"right",fontSize:10,color:T.slate600,marginTop:2}}>{pct.toFixed(0)}%</div>}
+    </div>
+  );
+}
+
+function GoalRing({value,max,color,size=78,label,sublabel}){
+  const pct=clamp(value/Math.max(max,1),0,1);
+  const r=30,circ=2*Math.PI*r,dash=circ*pct;
+  return(
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:5}}>
+      <div style={{position:"relative",width:size,height:size}}>
+        <svg width={size} height={size} viewBox="0 0 70 70">
+          <circle cx="35" cy="35" r={r} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth="6"/>
+          <circle cx="35" cy="35" r={r} fill="none" stroke={color} strokeWidth="6"
+            strokeDasharray={`${dash} ${circ}`} strokeLinecap="round" transform="rotate(-90 35 35)"
+            style={{transition:"stroke-dasharray 1s cubic-bezier(.4,0,.2,1)",filter:`drop-shadow(0 0 5px ${color}55)`}}/>
+        </svg>
+        <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <div style={{color,fontWeight:800,fontSize:13,lineHeight:1}}>{Math.round(pct*100)}%</div>
+        </div>
+      </div>
+      {label&&<div style={{color:T.slate300,fontSize:11,fontWeight:600,textAlign:"center",maxWidth:80}}>{label}</div>}
+      {sublabel&&<div style={{color:T.slate600,fontSize:10,textAlign:"center",maxWidth:80}}>{sublabel}</div>}
+    </div>
+  );
+}
+
+function Chip({children,color=T.slate600,onClick}){
+  const[hv,hp]=useHover();
+  return<span onClick={onClick} {...hp} style={{background:hv?`${color}28`:`${color}18`,border:`1px solid ${color}38`,borderRadius:7,padding:"3px 9px",fontSize:11,color,fontWeight:600,cursor:onClick?"pointer":"default",transition:"all 0.15s",display:"inline-flex",alignItems:"center"}}>{children}</span>;
+}
+
+function Toast({msg,type="success",onClose}){
+  const cols={success:T.green,warning:T.amber,error:T.red,info:T.indigo};
+  const c=cols[type]||T.indigo;
+  useEffect(()=>{const t=setTimeout(onClose,4000);return()=>clearTimeout(t);},[]);
+  return(
+    <div style={{position:"fixed",bottom:24,right:16,zIndex:9999,background:T.slate800,border:`1px solid ${c}45`,borderRadius:14,padding:"13px 18px",color:T.slate200,fontSize:13,boxShadow:`0 8px 32px rgba(0,0,0,0.55)`,display:"flex",alignItems:"center",gap:10,maxWidth:320,animation:"slideIn 0.3s ease",zIndex:9999}}>
+      <span style={{color:c,fontSize:18}}>{type==="success"?"✅":type==="warning"?"⚠️":type==="error"?"🚨":"💡"}</span>
+      <span style={{flex:1}}>{msg}</span>
+      <button onClick={onClose} style={{background:"none",border:"none",color:T.slate500,cursor:"pointer",fontSize:15}}>✕</button>
+    </div>
+  );
+}
+
+function ScoreRing({score,size=120}){
+  const r=44,circ=2*Math.PI*r,offset=circ*(1-score/100);
+  const color=score>=75?T.green:score>=50?T.amber:score>=30?T.orange:T.red;
+  return(
+    <div style={{position:"relative",width:size,height:size,flexShrink:0}}>
+      <svg width={size} height={size} viewBox="0 0 100 100">
+        <circle cx="50" cy="50" r={r} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth="8"/>
+        <circle cx="50" cy="50" r={r} fill="none" stroke={color} strokeWidth="8"
+          strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round" transform="rotate(-90 50 50)"
+          style={{transition:"stroke-dashoffset 1.4s cubic-bezier(.4,0,.2,1)",filter:`drop-shadow(0 0 10px ${color}88)`}}/>
+      </svg>
+      <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+        <div style={{color,fontWeight:800,fontSize:size>100?28:20}}>{score}</div>
+        <div style={{color:T.slate500,fontSize:9,fontWeight:600,letterSpacing:0.5}}>/ 100</div>
+      </div>
+    </div>
+  );
+}
+
+function Skeleton({width="100%",height=16,radius=7}){
+  return<div style={{width,height,borderRadius:radius,background:"rgba(255,255,255,0.05)",backgroundImage:"linear-gradient(90deg,rgba(255,255,255,0.04) 0%,rgba(255,255,255,0.09) 50%,rgba(255,255,255,0.04) 100%)",backgroundSize:"200% 100%",animation:"shimmer 1.6s infinite"}}/>;
+}
+
+function Modal({title,onClose,children,width=500}){
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",backdropFilter:"blur(6px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:16}} onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div style={{background:T.slate800,borderRadius:20,padding:26,width,maxWidth:"96vw",border:"1px solid rgba(255,255,255,0.1)",boxShadow:"0 32px 80px rgba(0,0,0,0.7)",maxHeight:"90vh",overflowY:"auto",animation:"slideIn 0.25s ease"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+          <h3 style={{margin:0,color:T.slate200,fontFamily:"'DM Serif Display',serif",fontSize:19}}>{title}</h3>
+          <button onClick={onClose} style={{background:"rgba(255,255,255,0.06)",border:"none",borderRadius:8,width:30,height:30,color:T.slate400,cursor:"pointer",fontSize:15,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function EmptyState({icon,title,desc,cta,onCta,onDemo}){
+  return(
+    <div style={{textAlign:"center",padding:"44px 20px",display:"flex",flexDirection:"column",alignItems:"center",gap:14}}>
+      <div style={{fontSize:52,animation:"float 3s ease-in-out infinite"}}>{icon}</div>
+      <div><div style={{color:T.slate200,fontSize:18,fontWeight:700,fontFamily:"'DM Serif Display',serif",marginBottom:5}}>{title}</div><div style={{color:T.slate500,fontSize:13,maxWidth:260,margin:"0 auto",lineHeight:1.6}}>{desc}</div></div>
+      <div style={{display:"flex",gap:10,flexWrap:"wrap",justifyContent:"center"}}>
+        {cta&&<button onClick={onCta} style={{...BS,background:`linear-gradient(135deg,${T.indigo},${T.violet})`,padding:"9px 20px",fontSize:13}}>{cta}</button>}
+        {onDemo&&<button onClick={onDemo} style={{...BS,background:"rgba(255,255,255,0.07)",color:T.slate400,border:"1px solid rgba(255,255,255,0.1)",padding:"9px 20px",fontSize:13}}>📊 Carica dati demo</button>}
+      </div>
+    </div>
+  );
+}
+
+function AchBadge({a,unlocked}){
+  const[hv,hp]=useHover();
+  return(
+    <div {...hp} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:5,opacity:unlocked?1:0.28,transition:"all 0.2s",filter:hv&&unlocked?`drop-shadow(0 0 8px ${T.amber}88)`:"none"}}>
+      <div style={{width:48,height:48,borderRadius:13,background:unlocked?`linear-gradient(135deg,${T.amber}35,${T.orange}18)`:"rgba(255,255,255,0.04)",border:`2px solid ${unlocked?T.amber:"rgba(255,255,255,0.08)"}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,boxShadow:unlocked?`0 0 14px ${T.amber}38`:"none"}}>{a.icon}</div>
+      <div style={{color:unlocked?T.slate300:T.slate600,fontSize:9,fontWeight:600,textAlign:"center",maxWidth:60,lineHeight:1.3}}>{a.title}</div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
+// DEFAULTS & ONBOARDING
+// ═══════════════════════════════════════════════════════
+const DEF_CFG={stipendio:2000,liquidita:0,debiti:0,fondoEmergenza:{attuale:0,obiettivo:3000},pac:{attuale:0,obiettivo:500,mensile:100,rendimentoAnnuo:7},risparmioMensile:{percentualeObiettivo:30},fire:{eta:30,capitaleAttuale:0,pacMensile:100,rendimentoAtteso:7,renditaDesiderata:1500,swr:4}};
+
+function Onboarding({onComplete}){
+  const[step,setStep]=useState(0);
+  const[data,setData]=useState({stipendio:2000,liquidita:0,debiti:0,fondoObiettivo:3000,pacMensile:100,renditaDesiderata:1500});
+  const steps=[
+    {icon:"👋",title:"Benvenuto in WealthOS",sub:"Il tuo AI Financial Advisor personale",field:null},
+    {icon:"💼",title:"Stipendio netto mensile",sub:"La base del tuo piano finanziario",field:"stipendio",label:"Stipendio (€)",min:500,max:15000,step:100},
+    {icon:"💵",title:"Liquidità disponibile",sub:"Saldo su conti correnti e contanti",field:"liquidita",label:"Liquidità (€)",min:0,max:200000,step:500},
+    {icon:"💳",title:"Debiti in corso?",sub:"Mutuo, prestiti, finanziamenti",field:"debiti",label:"Debiti totali (€)",min:0,max:500000,step:1000},
+    {icon:"🛡️",title:"Obiettivo fondo emergenza",sub:"Consigliato: 3-6 mesi di stipendio",field:"fondoObiettivo",label:"Obiettivo fondo (€)",min:500,max:50000,step:500},
+    {icon:"📈",title:"Quanto vuoi investire?",sub:"Anche €50/mese fa la differenza",field:"pacMensile",label:"PAC mensile (€)",min:0,max:5000,step:50},
+    {icon:"🔥",title:"La tua rendita ideale",sub:"Quando smetti di lavorare, quanto ti serve?",field:"renditaDesiderata",label:"Rendita desiderata (€/mese)",min:500,max:10000,step:100},
+  ];
+  const curr=steps[step];
+  const finish=()=>{
+    const cfg={...DEF_CFG,stipendio:data.stipendio,liquidita:data.liquidita,debiti:data.debiti,fondoEmergenza:{attuale:0,obiettivo:data.fondoObiettivo},pac:{...DEF_CFG.pac,mensile:data.pacMensile},fire:{...DEF_CFG.fire,renditaDesiderata:data.renditaDesiderata}};
+    onComplete(cfg);
+  };
+  return(
+    <div style={{minHeight:"100vh",background:T.slate950,display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
+      <style>{CSS_GLOBAL}</style>
+      <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+      <div style={{width:"100%",maxWidth:420}}>
+        <div style={{display:"flex",gap:5,marginBottom:36,justifyContent:"center"}}>
+          {steps.map((_,i)=><div key={i} style={{height:3,flex:1,borderRadius:99,background:i<=step?T.indigo:"rgba(255,255,255,0.08)",transition:"background 0.3s"}}/>)}
+        </div>
+        <div style={{textAlign:"center",marginBottom:32,animation:"slideIn 0.3s ease"}}>
+          <div style={{fontSize:60,marginBottom:14,animation:"float 3s ease-in-out infinite"}}>{curr.icon}</div>
+          <h2 style={{margin:"0 0 8px",color:T.slate200,fontFamily:"'DM Serif Display',serif",fontSize:24}}>{curr.title}</h2>
+          <p style={{color:T.slate500,fontSize:13,margin:0}}>{curr.sub}</p>
+        </div>
+        {curr.field&&(
+          <div style={{marginBottom:24}}>
+            <label style={{color:T.slate400,fontSize:12,display:"block",marginBottom:8}}>{curr.label}</label>
+            <input type="number" value={data[curr.field]} min={curr.min} max={curr.max} step={curr.step}
+              onChange={e=>setData(d=>({...d,[curr.field]:Number(e.target.value)}))}
+              style={{...IS,fontSize:22,padding:"14px 18px",textAlign:"center",fontWeight:800,color:T.indigo}}/>
+            <input type="range" min={curr.min} max={curr.max} step={curr.step} value={data[curr.field]}
+              onChange={e=>setData(d=>({...d,[curr.field]:Number(e.target.value)}))}
+              style={{width:"100%",marginTop:10,accentColor:T.indigo}}/>
+            <div style={{textAlign:"center",color:T.indigo,fontWeight:800,fontSize:24,marginTop:6}}>{fmt(data[curr.field])}</div>
+          </div>
+        )}
+        <div style={{display:"flex",gap:10}}>
+          {step>0&&<button onClick={()=>setStep(s=>s-1)} style={{...BS,background:"rgba(255,255,255,0.07)",color:T.slate400,flex:1}}>← Indietro</button>}
+          <button onClick={()=>step<steps.length-1?setStep(s=>s+1):finish()} style={{...BS,background:`linear-gradient(135deg,${T.indigo},${T.violet})`,flex:2}}>
+            {step===0?"Inizia →":step===steps.length-1?"🚀 Apri Dashboard":"Avanti →"}
+          </button>
+        </div>
+        {step===0&&<div style={{textAlign:"center",marginTop:14}}><button onClick={()=>onComplete(DEF_CFG)} style={{background:"none",border:"none",color:T.slate700,fontSize:12,cursor:"pointer",textDecoration:"underline"}}>Salta, usa dati demo</button></div>}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
+// TRACKER SPESE
+// ═══════════════════════════════════════════════════════
+function FormSpesa({form,setForm,onAdd}){
+  return(
+    <>
+      <h3 style={{margin:"0 0 12px",color:T.indigo,fontFamily:"'DM Serif Display',serif",fontSize:16}}>➕ Nuova Spesa</h3>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
+        <input placeholder="Descrizione" value={form.desc} onChange={e=>setForm({...form,desc:e.target.value})} style={IS}/>
+        <input placeholder="€ Importo" type="number" value={form.importo} onChange={e=>setForm({...form,importo:e.target.value})} style={IS}/>
+        <select value={form.categoria} onChange={e=>setForm({...form,categoria:e.target.value})} style={IS}>
+          {CATEGORIE.map(c=><option key={c}>{CAT_EMOJI[c]} {c}</option>)}
+        </select>
+        <input type="date" value={form.data} onChange={e=>setForm({...form,data:e.target.value})} style={IS}/>
+        <input placeholder="#tag #amazon #ristorante" value={form.tags} onChange={e=>setForm({...form,tags:e.target.value})} style={{...IS,gridColumn:"span 2"}}/>
+      </div>
+      <div style={{display:"flex",alignItems:"center",gap:16,marginTop:10}}>
+        <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",color:T.slate400,fontSize:12}}>
+          <input type="checkbox" checked={form.ricorrente} onChange={e=>setForm({...form,ricorrente:e.target.checked})} style={{accentColor:T.amber}}/>
+          🔄 Ricorrente
+        </label>
+        <button onClick={onAdd} style={{...BS,background:`linear-gradient(135deg,${T.indigo},${T.violet})`,marginLeft:"auto",padding:"9px 20px",fontSize:13}}>Aggiungi</button>
+      </div>
+    </>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
+// PATRIMONIO NETTO
+// ═══════════════════════════════════════════════════════
+function TrackerSpese({spese,setSpese}){
+  const[form,setForm]=useState({desc:"",importo:"",categoria:"Cibo",data:new Date().toISOString().slice(0,10),tags:"",ricorrente:false});
+  const[filtro,setFiltro]=useState("Tutte");
+  const[tagFiltro,setTagFiltro]=useState("");
+  const[toast,setToast]=useState(null);
+
+  const aggiungi=()=>{
+    if(!form.desc||!form.importo||isNaN(Number(form.importo)))return;
+    const tags=form.tags?form.tags.split(" ").map(t=>t.startsWith("#")?t:`#${t}`).filter(Boolean):[];
+    const n=[...spese,{...form,id:Date.now(),importo:Number(form.importo),tags}];
+    setSpese(n);storage.save("spese",n);
+    setForm({desc:"",importo:"",categoria:"Cibo",data:new Date().toISOString().slice(0,10),tags:"",ricorrente:false});
+    setToast({msg:"Spesa registrata!",type:"success"});
+  };
+  const elimina=id=>{const n=spese.filter(s=>s.id!==id);setSpese(n);storage.save("spese",n);};
+  const filtrate=useMemo(()=>{let r=filtro==="Tutte"?spese:spese.filter(s=>s.categoria===filtro);if(tagFiltro)r=r.filter(s=>s.tags&&s.tags.some(t=>t.includes(tagFiltro)));return r;},[spese,filtro,tagFiltro]);
+  const totale=useMemo(()=>filtrate.reduce((a,s)=>a+s.importo,0),[filtrate]);
+  const perCat=useMemo(()=>CATEGORIE.map(cat=>({name:cat,emoji:CAT_EMOJI[cat],valore:spese.filter(s=>s.categoria===cat).reduce((a,s)=>a+s.importo,0)})).filter(c=>c.valore>0),[spese]);
+  const allTags=useMemo(()=>[...new Set(spese.flatMap(s=>s.tags||[]))],[spese]);
+  const ricorrenti=useMemo(()=>spese.filter(s=>s.ricorrente),[spese]);
+  const heatmap=useMemo(()=>calcHeatmap(spese),[spese]);
+  const maxHeat=useMemo(()=>Math.max(...heatmap.map(d=>d.tot),1),[heatmap]);
+
+  if(spese.length===0) return(
+    <div style={{display:"grid",gap:18}}>
+      {toast&&<Toast {...toast} onClose={()=>setToast(null)}/>}
+      <EmptyState icon="💸" title="Nessuna spesa ancora" desc="Registra le tue spese per insight personalizzati e proiezioni AI." cta="+ Prima spesa" onCta={()=>{}} onDemo={()=>{setSpese(DEMO_SPESE);storage.save("spese",DEMO_SPESE);setToast({msg:"Dati demo caricati!",type:"info"});}}/>
+      <Card accent={T.indigo}><FormSpesa form={form} setForm={setForm} onAdd={aggiungi}/></Card>
+    </div>
+  );
+
+  return(
+    <div style={{display:"grid",gap:18}}>
+      {toast&&<Toast {...toast} onClose={()=>setToast(null)}/>}
+      <Card accent={T.indigo}><FormSpesa form={form} setForm={setForm} onAdd={aggiungi}/></Card>
+
+      {ricorrenti.length>0&&(
+        <Card>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+            <h3 style={{margin:0,color:T.slate200,fontFamily:"'DM Serif Display',serif",fontSize:15}}>🔄 Spese Ricorrenti</h3>
+            <Chip color={T.amber}>{fmt(ricorrenti.reduce((a,s)=>a+s.importo,0))}/mese</Chip>
+          </div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:7}}>
+            {ricorrenti.map(s=>(
+              <div key={s.id} style={{background:`${T.amber}0d`,border:`1px solid ${T.amber}28`,borderRadius:9,padding:"5px 11px",display:"flex",gap:7,alignItems:"center"}}>
+                <span style={{color:T.amber,fontSize:11}}>🔄</span>
+                <span style={{color:T.slate300,fontSize:12}}>{s.desc}</span>
+                <span style={{color:T.amber,fontWeight:700,fontSize:12}}>{fmt(s.importo)}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      <Card>
+        <h3 style={{margin:"0 0 10px",color:T.slate200,fontFamily:"'DM Serif Display',serif",fontSize:15}}>🔥 Heatmap Spese — {MESI[new Date().getMonth()]}</h3>
+        <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
+          {heatmap.map(d=>{
+            const alpha=d.tot>0?0.1+(d.tot/maxHeat)*0.85:0.05;
+            return(
+              <div key={d.giorno} title={`Giorno ${d.giorno}: ${fmt(d.tot)}`}
+                style={{width:26,height:26,borderRadius:5,background:d.tot>0?`rgba(99,102,241,${alpha})`:"rgba(255,255,255,0.03)",border:`1px solid ${d.tot>0?`rgba(99,102,241,${alpha*1.4})`:"rgba(255,255,255,0.05)"}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:8,color:d.tot>0?T.indigoL:T.slate700,fontWeight:600}}>
+                {d.giorno}
+              </div>
+            );
+          })}
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:6,marginTop:8,fontSize:10,color:T.slate600}}>
+          Basso {[0.1,0.3,0.5,0.7,0.9].map(a=><div key={a} style={{width:14,height:8,borderRadius:2,background:`rgba(99,102,241,${a})`}}/>)} Alto
+        </div>
+      </Card>
+
+      {allTags.length>0&&(
+        <Card>
+          <h3 style={{margin:"0 0 8px",color:T.slate200,fontSize:13,fontWeight:600}}>🏷️ Filtra per tag</h3>
+          <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+            <Chip color={tagFiltro===""?T.indigo:T.slate600} onClick={()=>setTagFiltro("")}>Tutti</Chip>
+            {allTags.map(tag=><Chip key={tag} color={tagFiltro===tag?T.indigo:T.slate600} onClick={()=>setTagFiltro(tagFiltro===tag?"":tag)}>{tag}</Chip>)}
+          </div>
+        </Card>
+      )}
+
+      {perCat.length>0&&(
+        <Card>
+          <h3 style={{margin:"0 0 12px",color:T.slate200,fontFamily:"'DM Serif Display',serif",fontSize:16}}>📊 Distribuzione</h3>
+          <div style={{display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
+            <ResponsiveContainer width={148} height={148}>
+              <PieChart><Pie data={perCat} dataKey="valore" cx="50%" cy="50%" innerRadius={38} outerRadius={68}>
+                {perCat.map((_,i)=><Cell key={i} fill={COLORS[i%COLORS.length]}/>)}
+              </Pie><Tooltip formatter={v=>fmt(v)} contentStyle={TT}/></PieChart>
+            </ResponsiveContainer>
+            <div style={{flex:1,display:"flex",flexDirection:"column",gap:5}}>
+              {perCat.map((c,i)=>(
+                <div key={c.name} style={{display:"flex",alignItems:"center",gap:7,fontSize:12}}>
+                  <span style={{width:7,height:7,borderRadius:"50%",background:COLORS[i%COLORS.length],display:"inline-block",flexShrink:0}}/>
+                  <span style={{color:T.slate400,flex:1}}>{c.emoji} {c.name}</span>
+                  <span style={{color:T.slate200,fontWeight:600}}>{fmt(c.valore)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Card>
+      )}
+
+      <Card>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+          <h3 style={{margin:0,color:T.slate200,fontFamily:"'DM Serif Display',serif",fontSize:15}}>📋 Registro ({filtrate.length})</h3>
+          <select value={filtro} onChange={e=>setFiltro(e.target.value)} style={{...IS,width:"auto",padding:"5px 10px",fontSize:12}}>
+            <option>Tutte</option>{CATEGORIE.map(c=><option key={c}>{c}</option>)}
+          </select>
+        </div>
+        {filtrate.length===0?<div style={{textAlign:"center",padding:20,color:T.slate600,fontSize:13}}>Nessuna spesa per questo filtro</div>:(
+          <>
+            <div style={{display:"flex",flexDirection:"column",gap:7,maxHeight:300,overflowY:"auto"}}>
+              {[...filtrate].reverse().map(s=>{
+                const ci=CATEGORIE.indexOf(s.categoria);
+                return(
+                  <div key={s.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"rgba(255,255,255,0.03)",borderRadius:9,padding:"9px 13px",borderLeft:`3px solid ${COLORS[ci%COLORS.length]}`}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{color:T.slate200,fontSize:13,fontWeight:600,display:"flex",alignItems:"center",gap:5}}>
+                        {CAT_EMOJI[s.categoria]} {s.desc}
+                        {s.ricorrente&&<span style={{background:`${T.amber}20`,borderRadius:3,padding:"1px 4px",fontSize:8,color:T.amber,fontWeight:700}}>FISSO</span>}
+                      </div>
+                      <div style={{color:T.slate600,fontSize:11,marginTop:1,display:"flex",gap:5,flexWrap:"wrap"}}>
+                        <span>{s.categoria}</span><span>·</span><span>{s.data}</span>
+                        {(s.tags||[]).map(tag=><span key={tag} style={{color:T.indigo}}>{tag}</span>)}
+                      </div>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+                      <span style={{color:T.red,fontWeight:700,fontSize:14}}>{fmt(s.importo)}</span>
+                      <button onClick={()=>elimina(s.id)} style={{background:"none",border:"none",color:T.slate600,cursor:"pointer",fontSize:13}}>✕</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid rgba(255,255,255,0.07)",display:"flex",justifyContent:"space-between",color:T.slate200,fontWeight:700,fontSize:15}}>
+              <span>Totale</span><span style={{color:T.indigo}}>{fmt(totale)}</span>
+            </div>
+          </>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+
+function PatrimonioNetto({cfg,assets,prezzi,spese}){
+  const[storico,setStorico]=useState([]);
+  const[loaded,setLoaded]=useState(false);
+  useEffect(()=>{storage.load("patrimonio_storico",[]).then(s=>{setStorico(s);setLoaded(true);});},[]);
+  const portVal=useMemo(()=>assets.reduce((s,a)=>{const p=prezzi[a.ticker];if(!p)return s;return s+a.quantita*p.prezzo*(p.valuta==="USD"?1/1.08:1);},0),[assets,prezzi]);
+  const netWorth=useMemo(()=>cfg.liquidita+portVal+cfg.pac.attuale+cfg.fondoEmergenza.attuale-(cfg.debiti||0),[cfg,portVal]);
+  useEffect(()=>{
+    if(!loaded)return;
+    const oggi=new Date(),k=`${oggi.getFullYear()}-${(oggi.getMonth()+1).toString().padStart(2,"0")}`;
+    if(storico.find(s=>s.mese===k))return;
+    const n=[...storico,{mese:k,valore:Math.round(netWorth),label:MESI[oggi.getMonth()]+" "+oggi.getFullYear()}].slice(-24);
+    setStorico(n);storage.save("patrimonio_storico",n);
+  },[loaded,netWorth]);
+  const ath=useMemo(()=>storico.length>0?Math.max(...storico.map(s=>s.valore)):netWorth,[storico,netWorth]);
+  const isATH=netWorth>=ath&&storico.length>1;
+  const prev=storico.length>=2?storico[storico.length-2].valore:null;
+  const crescita=prev?((netWorth-prev)/Math.abs(prev)*100):null;
+  const spkData=useMemo(()=>calcSparkline(spese,6),[spese]);
+  const componenti=[
+    {label:"Liquidità",val:cfg.liquidita,color:T.cyan},
+    {label:"Portfolio",val:portVal,color:T.indigo},
+    {label:"PAC",val:cfg.pac.attuale,color:T.green},
+    {label:"Fondo Emerg.",val:cfg.fondoEmergenza.attuale,color:T.amber},
+    {label:"Debiti",val:-(cfg.debiti||0),color:T.red},
+  ].filter(c=>c.val!==0);
+
+  return(
+    <div style={{display:"grid",gap:18}}>
+      {isATH&&(
+        <div style={{background:`linear-gradient(135deg,${T.amber}12,${T.orange}07)`,borderRadius:14,padding:"13px 18px",border:`1px solid ${T.amber}38`,display:"flex",alignItems:"center",gap:12,animation:"pulse 2s infinite"}}>
+          <span style={{fontSize:28}}>🏆</span>
+          <div><div style={{color:T.amber,fontWeight:700,fontSize:14}}>Nuovo Massimo Storico Patrimonio!</div><div style={{color:T.slate400,fontSize:12}}>Non sei mai stato così ricco. Mantieni la rotta!</div></div>
+        </div>
+      )}
+      <div style={{background:`linear-gradient(135deg,${T.indigo}14,${T.cyan}07)`,borderRadius:20,padding:"26px 22px",border:`1px solid ${T.indigo}25`,textAlign:"center"}}>
+        <div style={{color:T.slate400,fontSize:11,fontWeight:600,letterSpacing:0.6,textTransform:"uppercase",marginBottom:5}}>Patrimonio Netto</div>
+        <div style={{color:T.slate200,fontFamily:"'DM Serif Display',serif",fontSize:46,fontWeight:700,lineHeight:1}}>{fmtK(netWorth)}</div>
+        <div style={{display:"flex",justifyContent:"center",gap:10,marginTop:12,flexWrap:"wrap"}}>
+          {crescita!==null&&<Chip color={crescita>=0?T.green:T.red}>{crescita>=0?"📈":"📉"} {fmtP(crescita)} vs mese prec.</Chip>}
+          <Chip color={T.amber}>🏆 ATH: {fmtK(ath)}</Chip>
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:11}}>
+        <KPICard label="Liquidità" value={cfg.liquidita} color={T.cyan}/>
+        <KPICard label="Portfolio" value={portVal} color={T.indigo}/>
+        <KPICard label="PAC" value={cfg.pac.attuale} color={T.green}/>
+        <KPICard label="Spese trend" value="↑↓" color={T.red} sparkData={spkData} sub="6 mesi"/>
+      </div>
+      {componenti.filter(c=>c.val>0).length>1&&(
+        <Card>
+          <h3 style={{margin:"0 0 12px",color:T.slate200,fontFamily:"'DM Serif Display',serif",fontSize:15}}>🥧 Composizione</h3>
+          <div style={{display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
+            <ResponsiveContainer width={140} height={140}>
+              <PieChart><Pie data={componenti.filter(c=>c.val>0).map(c=>({name:c.label,value:c.val}))} dataKey="value" cx="50%" cy="50%" innerRadius={35} outerRadius={65}>
+                {componenti.filter(c=>c.val>0).map((c,i)=><Cell key={i} fill={c.color}/>)}
+              </Pie><Tooltip formatter={v=>fmt(v)} contentStyle={TT}/></PieChart>
+            </ResponsiveContainer>
+            <div style={{flex:1,display:"flex",flexDirection:"column",gap:7}}>
+              {componenti.map(c=>(
+                <div key={c.label}>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:2}}>
+                    <span style={{color:T.slate400,display:"flex",alignItems:"center",gap:5}}><span style={{width:7,height:7,borderRadius:"50%",background:c.color,display:"inline-block"}}/>{c.label}</span>
+                    <span style={{color:c.color,fontWeight:700}}>{c.val>=0?fmt(c.val):`-${fmt(Math.abs(c.val))}`}</span>
+                  </div>
+                  {c.val>0&&<ProgressBar value={c.val} max={Math.max(netWorth,1)} color={c.color} height={3}/>}
+                </div>
+              ))}
+            </div>
+          </div>
+        </Card>
+      )}
+      {storico.length>=2&&(
+        <Card>
+          <h3 style={{margin:"0 0 12px",color:T.slate200,fontFamily:"'DM Serif Display',serif",fontSize:15}}>📈 Evoluzione Patrimonio</h3>
+          <ResponsiveContainer width="100%" height={190}>
+            <AreaChart data={storico}>
+              <defs><linearGradient id="gNW" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={T.indigo} stopOpacity={0.3}/><stop offset="95%" stopColor={T.indigo} stopOpacity={0}/></linearGradient></defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)"/>
+              <XAxis dataKey="label" stroke={T.slate600} tick={{fontSize:9}}/><YAxis stroke={T.slate600} tick={{fontSize:9}} tickFormatter={fmtK}/>
+              <Tooltip formatter={v=>fmt(v)} contentStyle={TT}/>
+              <Area type="monotone" dataKey="valore" stroke={T.indigo} strokeWidth={2} fill="url(#gNW)" name="Patrimonio"/>
+            </AreaChart>
+          </ResponsiveContainer>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
+// OBIETTIVI
+// ═══════════════════════════════════════════════════════
+function Obiettivi({cfg,setCfg,spese}){
+  const[editMode,setEditMode]=useState(false);
+  const[temp,setTemp]=useState(null);
+  const[anniPac,setAnniPac]=useState(20);
+  const salva=()=>{setCfg(temp);storage.save("obiettivi",temp);setEditMode(false);};
+  const oggi=new Date(),meseC=oggi.getMonth(),annoC=oggi.getFullYear();
+  const speseMese=useMemo(()=>spese.filter(s=>{const d=new Date(s.data);return d.getFullYear()===annoC&&d.getMonth()===meseC;}).reduce((a,s)=>a+s.importo,0),[spese,meseC,annoC]);
+  const percSpesa=cfg.stipendio>0?(speseMese/cfg.stipendio)*100:0;
+  const risparmio=cfg.stipendio-speseMese;
+  const percFondo=cfg.fondoEmergenza.obiettivo>0?clamp((cfg.fondoEmergenza.attuale/cfg.fondoEmergenza.obiettivo)*100,0,100):0;
+  const percPac=cfg.pac.obiettivo>0?clamp((cfg.pac.attuale/cfg.pac.obiettivo)*100,0,100):0;
+  const mesiCop=cfg.stipendio>0?Math.floor(cfg.liquidita/cfg.stipendio):0;
+  const liqC=mesiCop>=3?T.green:mesiCop>=1?T.amber:T.red;
+  const giorno=oggi.getDate();
+  const proiez=giorno>0?(percSpesa/giorno)*30:0;
+  const mC=proiez<30?T.green:proiez<50?T.cyan:proiez<70?T.amber:T.red;
+  const mT=proiez<30?`🔥 Perfetto! Proiezione: ${proiez.toFixed(0)}% a fine mese`:proiez<50?`✅ Buon ritmo. Proiezione: ${proiez.toFixed(0)}%`:proiez<70?`⚠️ Attenzione: proiezione ${proiez.toFixed(0)}% — rallenta`:`🚨 Allerta: ${proiez.toFixed(0)}% proiettato — agisci ora!`;
+  const pacChart=useMemo(()=>calcPAC(cfg.pac.attuale,cfg.pac.mensile,cfg.pac.rendimentoAnnuo||7,anniPac),[cfg.pac,anniPac]);
+  const valFinale=pacChart[pacChart.length-1]?.conInteressi||0;
+  const interesse=valFinale-(cfg.pac.attuale+cfg.pac.mensile*anniPac*12);
+  const spkSpese=useMemo(()=>calcSparkline(spese,6),[spese]);
+  const trend6=spkSpese.length>=2?((spkSpese[spkSpese.length-1]-spkSpese[spkSpese.length-2])/Math.max(spkSpese[spkSpese.length-2],1)*100):0;
+
+  return(
+    <div style={{display:"grid",gap:18}}>
+      <div style={{background:`linear-gradient(135deg,${T.indigo}14,${T.cyan}07)`,borderRadius:18,padding:"18px 20px",border:`1px solid ${T.indigo}22`,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+        <div><div style={{color:T.slate400,fontSize:10,fontWeight:600,letterSpacing:0.5,textTransform:"uppercase",marginBottom:3}}>💼 Stipendio Mensile</div><div style={{color:T.slate200,fontFamily:"'DM Serif Display',serif",fontSize:30,fontWeight:700}}>{fmt(cfg.stipendio)}</div><div style={{color:T.slate600,fontSize:12,marginTop:3}}>Rimasto: <span style={{color:risparmio>=0?T.green:T.red,fontWeight:700}}>{fmt(risparmio)}</span></div></div>
+        <button onClick={()=>{setTemp(JSON.parse(JSON.stringify(cfg)));setEditMode(true);}} style={{...BS,background:"rgba(99,102,241,0.18)",border:`1px solid ${T.indigo}45`,color:T.indigoL,padding:"8px 16px",fontSize:12}}>✏️ Modifica</button>
+      </div>
+      <div style={{background:`${mC}12`,borderRadius:13,padding:"12px 16px",border:`1px solid ${mC}38`,display:"flex",gap:10,alignItems:"center"}}>
+        <div style={{flex:1,color:T.slate200,fontSize:13,lineHeight:1.6}}>{mT}</div>
+        <div style={{color:mC,fontWeight:800,fontSize:22,minWidth:48,textAlign:"right"}}>{percSpesa.toFixed(0)}%</div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:11}}>
+        <KPICard label="Risparmio Mese" value={Math.max(0,risparmio)} color={risparmio>=0?T.green:T.red} sub={`${Math.max(0,100-percSpesa).toFixed(0)}% stipendio`}/>
+        <KPICard label="% Spesa" value={`${percSpesa.toFixed(1)}%`} color={percSpesa<=cfg.risparmioMensile.percentualeObiettivo?T.green:T.red} trend={trend6}/>
+        <KPICard label="Liquidità" value={`${mesiCop}m`} color={liqC} sub="mesi copertura"/>
+      </div>
+      <Card>
+        <h3 style={{margin:"0 0 14px",color:T.slate200,fontFamily:"'DM Serif Display',serif",fontSize:15}}>🎯 Goal Progress</h3>
+        <div style={{display:"flex",gap:14,justifyContent:"space-around",flexWrap:"wrap"}}>
+          <GoalRing value={cfg.fondoEmergenza.attuale} max={cfg.fondoEmergenza.obiettivo} color={T.amber} label="Fondo Emerg." sublabel={`${fmt(cfg.fondoEmergenza.attuale)}`}/>
+          <GoalRing value={cfg.pac.attuale} max={cfg.pac.obiettivo} color={T.cyan} label="PAC" sublabel={`${fmt(cfg.pac.attuale)}`}/>
+          <GoalRing value={Math.max(0,risparmio)} max={cfg.stipendio*cfg.risparmioMensile.percentualeObiettivo/100} color={T.green} label="Risparmio" sublabel="obiettivo mese"/>
+          <GoalRing value={mesiCop} max={6} color={liqC} label="Liquidità" sublabel={`${mesiCop}/6 mesi`}/>
+        </div>
+      </Card>
+      <Card>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}><span style={{color:T.slate200,fontWeight:600,fontSize:14}}>💸 Budget Mensile</span><span style={{color:T.slate500,fontSize:12}}>{fmt(speseMese)} / {fmt(cfg.stipendio)}</span></div>
+        <ProgressBar value={speseMese} max={cfg.stipendio} color={percSpesa>70?T.red:percSpesa>40?T.amber:T.green} height={12} showPct/>
+        <div style={{display:"flex",justifyContent:"space-between",marginTop:5,fontSize:11,color:T.slate600}}>
+          <span>Target &lt;{cfg.risparmioMensile.percentualeObiettivo}% stipendio</span>
+          <span style={{color:percSpesa<=cfg.risparmioMensile.percentualeObiettivo?T.green:T.red,fontWeight:700}}>{percSpesa<=cfg.risparmioMensile.percentualeObiettivo?"✅ In target":"❌ Fuori target"}</span>
+        </div>
+      </Card>
+      <Card>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}><div><div style={{color:T.slate200,fontWeight:600,fontSize:14}}>💵 Liquidità</div><div style={{color:T.slate600,fontSize:11,marginTop:1}}>Conto corrente</div></div><div style={{textAlign:"right"}}><div style={{color:liqC,fontWeight:800,fontSize:20}}>{fmt(cfg.liquidita)}</div><div style={{color:T.slate600,fontSize:11}}>{mesiCop} mesi</div></div></div>
+        <ProgressBar value={Math.min(cfg.liquidita,cfg.stipendio*6)} max={cfg.stipendio*6} color={liqC} height={10}/>
+        <div style={{marginTop:9,background:`${liqC}0f`,borderRadius:9,padding:"9px 13px",border:`1px solid ${liqC}28`,color:T.slate200,fontSize:12}}>
+          {mesiCop>=6?"🛡️ Eccellente! Copertura oltre 6 mesi.":mesiCop>=3?`✅ Buona. ${mesiCop} mesi di copertura.`:mesiCop>=1?"⚠️ Bassa. Punta a 3 mesi.":"🚨 Critica! Priorità assoluta."}
+        </div>
+      </Card>
+      <Card>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}><div><div style={{color:T.slate200,fontWeight:600,fontSize:14}}>🛡️ Fondo Emergenza</div><div style={{color:T.slate600,fontSize:11}}>Target: {fmt(cfg.fondoEmergenza.obiettivo)}</div></div><div style={{textAlign:"right"}}><div style={{color:T.amber,fontWeight:800,fontSize:20}}>{percFondo.toFixed(0)}%</div><div style={{color:T.slate600,fontSize:11}}>{fmt(cfg.fondoEmergenza.attuale)}</div></div></div>
+        <ProgressBar value={cfg.fondoEmergenza.attuale} max={cfg.fondoEmergenza.obiettivo} color={T.amber} height={10} showPct/>
+        {cfg.fondoEmergenza.attuale<cfg.fondoEmergenza.obiettivo&&cfg.pac.mensile>0&&<div style={{marginTop:6,color:T.slate600,fontSize:11}}>⏱ ~<span style={{color:T.cyan,fontWeight:600}}>{Math.ceil((cfg.fondoEmergenza.obiettivo-cfg.fondoEmergenza.attuale)/cfg.pac.mensile)} mesi</span> al completamento</div>}
+      </Card>
+      <Card>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}><div><div style={{color:T.slate200,fontWeight:600,fontSize:14}}>📈 PAC</div><div style={{color:T.slate600,fontSize:11}}><span style={{color:T.cyan,fontWeight:600}}>{fmt(cfg.pac.mensile)}/mese</span> · {cfg.pac.rendimentoAnnuo||7}% rend.</div></div><div style={{textAlign:"right"}}><div style={{color:T.cyan,fontWeight:800,fontSize:20}}>{percPac.toFixed(0)}%</div><div style={{color:T.slate600,fontSize:11}}>{fmt(cfg.pac.attuale)}</div></div></div>
+        <ProgressBar value={cfg.pac.attuale} max={cfg.pac.obiettivo} color={T.cyan} height={10} showPct/>
+        <div style={{marginTop:18}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+            <span style={{color:T.slate200,fontSize:13,fontWeight:600}}>🔮 Proiezione PAC</span>
+            <div style={{display:"flex",gap:4}}>{[5,10,20,30].map(y=><button key={y} onClick={()=>setAnniPac(y)} style={{...BS,padding:"3px 8px",fontSize:10,background:anniPac===y?`${T.indigo}38`:"rgba(255,255,255,0.05)",border:`1px solid ${anniPac===y?T.indigo:"rgba(255,255,255,0.09)"}`,color:anniPac===y?T.indigoL:T.slate600}}>{y}a</button>)}</div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:9,marginBottom:12}}>
+            <KPICard label={`Cap. ${anniPac}a`} value={valFinale} color={T.cyan}/>
+            <KPICard label="Versato" value={cfg.pac.attuale+cfg.pac.mensile*anniPac*12} color={T.indigo}/>
+            <KPICard label="Interessi" value={Math.max(0,interesse)} color={T.green}/>
+          </div>
+          <ResponsiveContainer width="100%" height={170}>
+            <AreaChart data={pacChart}>
+              <defs>
+                <linearGradient id="gCI" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={T.cyan} stopOpacity={0.3}/><stop offset="95%" stopColor={T.cyan} stopOpacity={0}/></linearGradient>
+                <linearGradient id="gSI" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={T.indigo} stopOpacity={0.18}/><stop offset="95%" stopColor={T.indigo} stopOpacity={0}/></linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)"/>
+              <XAxis dataKey="anno" stroke={T.slate600} tick={{fontSize:9}} tickFormatter={v=>`a.${v}`}/>
+              <YAxis stroke={T.slate600} tick={{fontSize:9}} tickFormatter={fmtK} width={50}/>
+              <Tooltip formatter={(v,n)=>[fmtK(v),n==="conInteressi"?"Con rendimento":"Solo versamenti"]} contentStyle={TT} labelFormatter={v=>`Anno ${v}`}/>
+              <Legend formatter={v=>v==="conInteressi"?"✨ Con rendimento":"Solo versamenti"} wrapperStyle={{fontSize:10,color:T.slate400}}/>
+              <Area type="monotone" dataKey="conInteressi" stroke={T.cyan} strokeWidth={2} fill="url(#gCI)" dot={false}/>
+              <Area type="monotone" dataKey="senzaInteressi" stroke={T.indigo} strokeWidth={1.5} fill="url(#gSI)" dot={false} strokeDasharray="5 4"/>
+            </AreaChart>
+          </ResponsiveContainer>
+          <div style={{textAlign:"center",color:T.slate600,fontSize:10,marginTop:5}}>💡 La differenza tra le due linee è l'interesse composto</div>
+        </div>
+      </Card>
+      {editMode&&temp&&(
+        <Modal title="✏️ Modifica Obiettivi" onClose={()=>setEditMode(false)}>
+          <div style={{display:"grid",gap:11}}>
+            {[
+              {label:"💼 Stipendio netto (€)",val:temp.stipendio,set:v=>setTemp({...temp,stipendio:v})},
+              {label:"💵 Liquidità (€)",val:temp.liquidita,set:v=>setTemp({...temp,liquidita:v})},
+              {label:"💳 Debiti totali (€)",val:temp.debiti||0,set:v=>setTemp({...temp,debiti:v})},
+              {label:"🛡️ Fondo emergenza attuale (€)",val:temp.fondoEmergenza.attuale,set:v=>setTemp({...temp,fondoEmergenza:{...temp.fondoEmergenza,attuale:v}})},
+              {label:"🎯 Obiettivo fondo (€)",val:temp.fondoEmergenza.obiettivo,set:v=>setTemp({...temp,fondoEmergenza:{...temp.fondoEmergenza,obiettivo:v}})},
+              {label:"📈 PAC attuale (€)",val:temp.pac.attuale,set:v=>setTemp({...temp,pac:{...temp.pac,attuale:v}})},
+              {label:"🎯 Obiettivo PAC (€)",val:temp.pac.obiettivo,set:v=>setTemp({...temp,pac:{...temp.pac,obiettivo:v}})},
+              {label:"📅 Versamento PAC (€/mese)",val:temp.pac.mensile,set:v=>setTemp({...temp,pac:{...temp.pac,mensile:v}})},
+              {label:"📊 Rendimento PAC (%)",val:temp.pac.rendimentoAnnuo||7,set:v=>setTemp({...temp,pac:{...temp.pac,rendimentoAnnuo:v}})},
+              {label:"💡 Max % spesa mensile",val:temp.risparmioMensile.percentualeObiettivo,set:v=>setTemp({...temp,risparmioMensile:{percentualeObiettivo:v}})},
+            ].map(({label,val,set})=>(
+              <div key={label}><label style={{color:T.slate400,fontSize:11,display:"block",marginBottom:3}}>{label}</label><input type="number" value={val} onChange={e=>set(Number(e.target.value))} style={IS}/></div>
+            ))}
+          </div>
+          <div style={{display:"flex",gap:9,marginTop:18}}>
+            <button onClick={salva} style={{...BS,flex:1,background:`linear-gradient(135deg,${T.indigo},${T.violet})`}}>💾 Salva</button>
+            <button onClick={()=>setEditMode(false)} style={{...BS,flex:1,background:"rgba(255,255,255,0.07)",color:T.slate400}}>Annulla</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
+// PORTAFOGLIO
+// ═══════════════════════════════════════════════════════
+function FormAsset({form,setForm,onAdd}){
+  return(
+    <>
+      <h3 style={{margin:"0 0 12px",color:T.green,fontFamily:"'DM Serif Display',serif",fontSize:16}}>➕ Aggiungi Asset</h3>
+      <div style={{marginBottom:10}}>
+        <div style={{color:T.slate500,fontSize:11,marginBottom:6}}>⚡ Popolari su Trade Republic:</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+          {TICKER_SUGGERITI.map(s=><button key={s.ticker} onClick={()=>setForm(f=>({...f,ticker:s.ticker,nome:s.nome,tipo:s.tipo}))} style={{...BS,padding:"3px 9px",fontSize:10,background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.09)",color:T.slate400}}>{s.ticker}</button>)}
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
+        <input placeholder="Ticker (es. VWCE.DE)" value={form.ticker} onChange={e=>setForm({...form,ticker:e.target.value.toUpperCase()})} style={IS}/>
+        <input placeholder="Nome opzionale" value={form.nome} onChange={e=>setForm({...form,nome:e.target.value})} style={IS}/>
+        <input placeholder="Quantità" type="number" value={form.quantita} onChange={e=>setForm({...form,quantita:e.target.value})} style={IS}/>
+        <select value={form.tipo} onChange={e=>setForm({...form,tipo:e.target.value})} style={IS}><option>ETF</option><option>Crypto</option><option>Azione</option></select>
+      </div>
+      <div style={{color:T.slate600,fontSize:11,marginTop:6}}>💡 Ticker da Yahoo Finance · USD→EUR tasso ~1.08</div>
+      <button onClick={onAdd} style={{...BS,marginTop:11,background:`linear-gradient(135deg,${T.green},${T.cyan})`,padding:"9px 20px",fontSize:13}}>Aggiungi</button>
+    </>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
+// AI ADVISOR
+// ═══════════════════════════════════════════════════════
+function Portafoglio({assets,setAssets,prezzi,setPrezzi}){
+  const[form,setForm]=useState({ticker:"",nome:"",quantita:"",tipo:"ETF"});
+  const[loading,setLoading]=useState({});
+  const[errori,setErrori]=useState({});
+  const[toast,setToast]=useState(null);
+  const fetch1=useCallback(async ticker=>{
+    setLoading(l=>({...l,[ticker]:true}));
+    const p=await fetchPrezzo(ticker);
+    if(p){setPrezzi(pr=>({...pr,[ticker]:p}));setErrori(e=>{const n={...e};delete n[ticker];return n;});}
+    else setErrori(e=>({...e,[ticker]:true}));
+    setLoading(l=>({...l,[ticker]:false}));
+  },[]);
+  useEffect(()=>{assets.forEach(a=>{if(!prezzi[a.ticker])fetch1(a.ticker);});},[assets]);
+  const aggiungi=()=>{
+    if(!form.ticker||!form.quantita||isNaN(Number(form.quantita)))return;
+    const t=form.ticker.trim().toUpperCase();
+    const n=[...assets,{ticker:t,nome:form.nome||t,quantita:Number(form.quantita),tipo:form.tipo,id:Date.now()}];
+    setAssets(n);storage.save("assets",n);
+    setForm({ticker:"",nome:"",quantita:"",tipo:"ETF"});
+    fetch1(t);setToast({msg:"Asset aggiunto!",type:"success"});
+  };
+  const elimina=id=>{const n=assets.filter(a=>a.id!==id);setAssets(n);storage.save("assets",n);};
+  const valA=useCallback(a=>{const p=prezzi[a.ticker];if(!p)return 0;return a.quantita*p.prezzo*(p.valuta==="USD"?1/1.08:1);},[prezzi]);
+  const tot=useMemo(()=>assets.reduce((s,a)=>s+valA(a),0),[assets,valA]);
+  const alloc=useMemo(()=>assets.map((a,i)=>({name:a.nome||a.ticker,value:valA(a),fill:COLORS[i%COLORS.length]})).filter(x=>x.value>0),[assets,valA]);
+
+  if(assets.length===0) return(
+    <div style={{display:"grid",gap:18}}>
+      {toast&&<Toast {...toast} onClose={()=>setToast(null)}/>}
+      <EmptyState icon="📦" title="Portfolio vuoto" desc="Aggiungi ETF e crypto per monitorare il valore in tempo reale." cta="+ Aggiungi asset"/>
+      <Card accent={T.green}><FormAsset form={form} setForm={setForm} onAdd={aggiungi}/></Card>
+    </div>
+  );
+  return(
+    <div style={{display:"grid",gap:18}}>
+      {toast&&<Toast {...toast} onClose={()=>setToast(null)}/>}
+      <Card accent={T.green}><FormAsset form={form} setForm={setForm} onAdd={aggiungi}/></Card>
+      <div style={{background:`linear-gradient(135deg,${T.green}10,${T.cyan}07)`,borderRadius:18,padding:"18px 20px",border:`1px solid ${T.green}22`,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+        <div><div style={{color:T.slate400,fontSize:10,fontWeight:600,letterSpacing:0.5,textTransform:"uppercase"}}>💼 Valore Portfolio</div><div style={{color:T.green,fontFamily:"'DM Serif Display',serif",fontSize:34,fontWeight:700}}>{fmt(tot)}</div><div style={{color:T.slate600,fontSize:11}}>{assets.length} asset</div></div>
+        <button onClick={()=>assets.forEach(a=>fetch1(a.ticker))} style={{...BS,background:`rgba(16,185,129,0.15)`,border:`1px solid ${T.green}38`,color:T.green,padding:"8px 16px",fontSize:12}}>🔄 Aggiorna prezzi</button>
+      </div>
+      {alloc.length>0&&(
+        <Card>
+          <h3 style={{margin:"0 0 12px",color:T.slate200,fontFamily:"'DM Serif Display',serif",fontSize:15}}>🥧 Allocazione</h3>
+          <div style={{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
+            <ResponsiveContainer width={138} height={138}>
+              <PieChart><Pie data={alloc} dataKey="value" cx="50%" cy="50%" innerRadius={35} outerRadius={64}>
+                {alloc.map((e,i)=><Cell key={i} fill={e.fill}/>)}
+              </Pie><Tooltip formatter={v=>fmt(v)} contentStyle={TT}/></PieChart>
+            </ResponsiveContainer>
+            <div style={{flex:1,display:"flex",flexDirection:"column",gap:5}}>
+              {alloc.map((a,i)=>(
+                <div key={a.name} style={{display:"flex",alignItems:"center",gap:7,fontSize:11}}>
+                  <span style={{width:7,height:7,borderRadius:"50%",background:a.fill,display:"inline-block",flexShrink:0}}/>
+                  <span style={{color:T.slate400,flex:1}}>{a.name}</span>
+                  <span style={{color:T.slate300,fontWeight:700}}>{tot>0?((a.value/tot)*100).toFixed(1):0}%</span>
+                  <span style={{color:T.slate500}}>{fmt(a.value)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Card>
+      )}
+      <Card>
+        <h3 style={{margin:"0 0 12px",color:T.slate200,fontFamily:"'DM Serif Display',serif",fontSize:15}}>📋 Asset</h3>
+        <div style={{display:"flex",flexDirection:"column",gap:9}}>
+          {assets.map((a,i)=>{
+            const p=prezzi[a.ticker],v=valA(a),err=errori[a.ticker],ld=loading[a.ticker],varz=p?.variazione||0;
+            const tcolor=a.tipo==="ETF"?T.cyan:a.tipo==="Crypto"?T.amber:T.green;
+            return(
+              <div key={a.id} style={{display:"flex",alignItems:"center",gap:10,background:"rgba(255,255,255,0.03)",borderRadius:11,padding:"11px 14px",borderLeft:`3px solid ${COLORS[i%COLORS.length]}`}}>
+                <div style={{flex:1}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                    <span style={{color:T.slate200,fontWeight:700,fontSize:13}}>{a.ticker}</span>
+                    <span style={{background:`${tcolor}18`,border:`1px solid ${tcolor}35`,borderRadius:4,padding:"1px 6px",fontSize:9,color:tcolor,fontWeight:600}}>{a.tipo}</span>
+                  </div>
+                  <div style={{color:T.slate600,fontSize:11,marginTop:1}}>{a.nome} · {a.quantita} quote</div>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  {ld?<Skeleton width={72} height={12}/>:err?<div style={{color:T.red,fontSize:11}}>⚠️ Non trovato</div>:p?(<><div style={{color:T.slate200,fontWeight:700,fontSize:14}}>{fmt(v)}</div><div style={{color:T.slate500,fontSize:10}}>{p.prezzo.toFixed(2)} {p.valuta}</div><div style={{color:varz>=0?T.green:T.red,fontSize:10,fontWeight:600}}>{varz>=0?"▲":"▼"}{Math.abs(varz).toFixed(2)}%</div></>):<Skeleton width={72} height={12}/>}
+                </div>
+                <div style={{display:"flex",gap:3}}>
+                  <button onClick={()=>fetch1(a.ticker)} style={{background:"rgba(255,255,255,0.05)",border:"none",borderRadius:6,width:26,height:26,color:T.slate400,cursor:"pointer",fontSize:11}}>🔄</button>
+                  <button onClick={()=>elimina(a.id)} style={{background:"rgba(255,255,255,0.05)",border:"none",borderRadius:6,width:26,height:26,color:T.slate500,cursor:"pointer",fontSize:11}}>✕</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+
+function AIAdvisor({cfg,spese,assets,prezzi}){
+  const[report,setReport]=useState("");
+  const[ldRep,setLdRep]=useState(false);
+  const[activeIns,setActiveIns]=useState(null);
+  const[scenModal,setScenModal]=useState(false);
+  const[scen,setScen]=useState({pacExtra:0,riduzioneSpese:0,rendExtra:0});
+  const[scenRes,setScenRes]=useState(null);
+  const{total:hs,breakdown,spiegazioni}=useMemo(()=>calcHealthScore(cfg,spese,assets,prezzi),[cfg,spese,assets,prezzi]);
+  const insights=useMemo(()=>calcInsights(spese,cfg.stipendio),[spese,cfg.stipendio]);
+  const hsC=hs>=75?T.green:hs>=50?T.amber:hs>=30?T.orange:T.red;
+  const hsL=hs>=75?"Eccellente 🌟":hs>=50?"Buona 👍":hs>=30?"Da migliorare ⚠️":"Critica 🚨";
+  const bmeta={fondo:{label:"Fondo Emergenza",max:20},risparmio:{label:"Risparmio",max:20},liquidita:{label:"Liquidità",max:15},pac:{label:"PAC",max:20},diversificazione:{label:"Diversificazione",max:15},debiti:{label:"Debiti",max:10}};
+
+  const runScen=()=>{
+    const cfgS={...cfg,pac:{...cfg.pac,mensile:cfg.pac.mensile+scen.pacExtra}};
+    const fb=calcFIRE(cfg);
+    const fs=calcFIRE({...cfgS,fire:{...cfg.fire,pacMensile:cfg.fire.pacMensile+scen.pacExtra,rendimentoAtteso:(cfg.fire.rendimentoAtteso||7)+scen.rendExtra}});
+    setScenRes({base:fb,sim:fs,anniRisp:Math.round((fb.mesi-fs.mesi)/12*10)/10});
+  };
+
+  const genReport=async()=>{
+    setLdRep(true);setReport("");
+    try{
+      const oggi=new Date(),mC=oggi.getMonth(),aC=oggi.getFullYear();
+      const sm=spese.filter(s=>{const d=new Date(s.data);return d.getFullYear()===aC&&d.getMonth()===mC;}).reduce((a,s)=>a+s.importo,0);
+      const pv=assets.reduce((s,a)=>{const p=prezzi[a.ticker];if(!p)return s;return s+a.quantita*p.prezzo*(p.valuta==="USD"?1/1.08:1);},0);
+      const ctx=`Stipendio ${cfg.stipendio}€, liquidità ${cfg.liquidita}€, fondo ${cfg.fondoEmergenza.attuale}/${cfg.fondoEmergenza.obiettivo}€, PAC ${cfg.pac.attuale}€ (${cfg.pac.mensile}€/m), portfolio ${pv.toFixed(0)}€, spese mese ${sm.toFixed(0)}€, score ${hs}/100.`;
+      const t=await callAI("Sei un consulente finanziario italiano premium. Sii preciso, motivante, concreto. Usa emoji. Max 280 parole.",`Genera report mensile: 1) Stato in 2 righe 2) Top 3 punti forza 3) 2 priorità miglioramento 4) 1 azione da fare subito. ${ctx}`);
+      setReport(t);
+    }catch{setReport("⚠️ Errore API. Riprova.");}
+    setLdRep(false);
+  };
+
+  const chiediCons=async ins=>{
+    setActiveIns({...ins,loading:true,risposta:""});
+    try{
+      const r=await callAI("Consulente finanziario italiano. Conciso, pratico, motivante. Max 130 parole.",`Problema: "${ins.testo}". Pattern: ${ins.pattern}. Dai 2-3 consigli pratici con emoji.`);
+      setActiveIns(prev=>({...prev,loading:false,risposta:r}));
+    }catch{setActiveIns(prev=>({...prev,loading:false,risposta:"Errore."}))}
+  };
+
+  const unlockedAch=useMemo(()=>ACHIEVEMENTS.filter(a=>{try{return a.check(spese,cfg,assets,prezzi);}catch{return false;}}),[spese,cfg,assets,prezzi]);
+
+  return(
+    <div style={{display:"grid",gap:18}}>
+      <div style={{background:`linear-gradient(135deg,${hsC}0e,${T.slate800})`,borderRadius:20,padding:"22px 20px",border:`1px solid ${hsC}25`}}>
+        <div style={{display:"flex",alignItems:"center",gap:18,flexWrap:"wrap"}}>
+          <ScoreRing score={hs} size={112}/>
+          <div style={{flex:1}}>
+            <div style={{color:T.slate400,fontSize:10,fontWeight:600,letterSpacing:0.5,textTransform:"uppercase",marginBottom:3}}>Financial Health Score</div>
+            <div style={{color:hsC,fontFamily:"'DM Serif Display',serif",fontSize:24,fontWeight:700,marginBottom:5}}>{hsL}</div>
+            <div style={{color:T.slate500,fontSize:12,lineHeight:1.6}}>{hs>=75?"Profilo solido. Continua a ottimizzare.":hs>=50?"Buone basi. Margini di miglioramento importanti.":hs>=30?"Alcune aree richiedono attenzione.":"Intervento urgente richiesto."}</div>
+          </div>
+        </div>
+      </div>
+      <Card>
+        <h3 style={{margin:"0 0 14px",color:T.slate200,fontFamily:"'DM Serif Display',serif",fontSize:15}}>📊 Score Breakdown</h3>
+        <div style={{display:"grid",gap:10}}>
+          {Object.entries(breakdown).map(([k,v])=>{
+            const m=bmeta[k];if(!m)return null;
+            const pct=(v/m.max)*100;const c=pct>=75?T.green:pct>=50?T.amber:T.red;
+            return(
+              <div key={k} style={{background:`${c}07`,borderRadius:9,padding:"9px 13px",border:`1px solid ${c}1a`}}>
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3}}>
+                  <span style={{color:T.slate300,fontWeight:600}}>{m.label}</span>
+                  <span style={{color:c,fontWeight:700}}>{v}/{m.max}</span>
+                </div>
+                <ProgressBar value={v} max={m.max} color={c} height={4}/>
+                <div style={{color:pct>=100?T.green:T.slate500,fontSize:10,marginTop:4}}>{spiegazioni[k]}</div>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+      <Card accent={T.violet} glow={T.violet}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+          <div><h3 style={{margin:0,color:T.violet,fontFamily:"'DM Serif Display',serif",fontSize:15}}>🔮 Scenario Simulator</h3><div style={{color:T.slate600,fontSize:11,marginTop:1}}>Simula impatto di cambiamenti futuri</div></div>
+          <button onClick={()=>setScenModal(true)} style={{...BS,background:`rgba(167,139,250,0.18)`,border:`1px solid ${T.violet}45`,color:T.violet,padding:"7px 14px",fontSize:12}}>Simula →</button>
+        </div>
+        <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+          {[{l:"+ €200 PAC",fn:()=>{setScen(s=>({...s,pacExtra:200}));setScenModal(true);}},{l:"- 10% spese",fn:()=>{setScen(s=>({...s,riduzioneSpese:10}));setScenModal(true);}},{l:"Mercato +2%",fn:()=>{setScen(s=>({...s,rendExtra:2}));setScenModal(true);}}].map(({l,fn})=>(
+            <button key={l} onClick={fn} style={{...BS,background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.09)",color:T.slate400,padding:"6px 12px",fontSize:11}}>{l}</button>
+          ))}
+        </div>
+      </Card>
+      <Card>
+        <h3 style={{margin:"0 0 12px",color:T.slate200,fontFamily:"'DM Serif Display',serif",fontSize:15}}>🤖 AI Insights</h3>
+        <div style={{display:"flex",flexDirection:"column",gap:9}}>
+          {insights.map((ins,i)=>{
+            const c=ins.tipo==="positive"?T.green:ins.tipo==="warning"?T.amber:ins.tipo==="info"?T.cyan:T.red;
+            return(
+              <div key={i} style={{background:`${c}0b`,borderRadius:11,padding:"11px 14px",border:`1px solid ${c}25`}}>
+                <div style={{display:"flex",justifyContent:"space-between",gap:7,marginBottom:5}}>
+                  <div style={{color:T.slate200,fontSize:12,lineHeight:1.6,fontWeight:600}}>{ins.emoji} {ins.testo}</div>
+                  {ins.risparmio>0&&<span style={{background:`${T.green}18`,border:`1px solid ${T.green}35`,borderRadius:5,padding:"2px 7px",fontSize:10,color:T.green,fontWeight:700,whiteSpace:"nowrap",alignSelf:"flex-start"}}>+{fmt(ins.risparmio)}/m</span>}
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                  <span style={{color:T.slate600,fontSize:10}}>{ins.pattern} · {ins.impatto}</span>
+                  <button onClick={()=>chiediCons(ins)} style={{...BS,padding:"3px 10px",fontSize:10,background:`${c}15`,border:`1px solid ${c}30`,color:c,marginLeft:"auto"}}>💡 Consiglio AI</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+      <Card>
+        <h3 style={{margin:"0 0 12px",color:T.slate200,fontFamily:"'DM Serif Display',serif",fontSize:15}}>🏅 Achievement</h3>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+          {ACHIEVEMENTS.map(a=><AchBadge key={a.id} a={a} unlocked={unlockedAch.some(u=>u.id===a.id)}/>)}
+        </div>
+        {unlockedAch.length>0&&<div style={{color:T.slate600,fontSize:11,marginTop:10}}>✅ {unlockedAch.length}/{ACHIEVEMENTS.length} achievement sbloccati</div>}
+      </Card>
+      <Card accent={T.indigo}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
+          <div><h3 style={{margin:0,color:T.slate200,fontFamily:"'DM Serif Display',serif",fontSize:15}}>📄 Report AI Mensile</h3><div style={{color:T.slate600,fontSize:11,marginTop:1}}>Analisi personalizzata da Claude AI</div></div>
+          <button onClick={genReport} disabled={ldRep} style={{...BS,background:`linear-gradient(135deg,${T.indigo},${T.violet})`,opacity:ldRep?0.7:1,padding:"8px 18px",fontSize:12}}>{ldRep?"⏳ Generando...":"✨ Genera Report"}</button>
+        </div>
+        {ldRep?(<div style={{display:"flex",flexDirection:"column",gap:7}}>{[100,85,90,72,88].map((w,i)=><Skeleton key={i} width={`${w}%`} height={12}/>)}</div>):
+        report?(<div style={{background:"rgba(255,255,255,0.03)",borderRadius:11,padding:16,color:T.slate200,fontSize:13,lineHeight:1.9,whiteSpace:"pre-wrap",borderLeft:`3px solid ${T.indigo}`}}>{report}</div>):
+        (<div style={{textAlign:"center",padding:"24px",color:T.slate600}}><div style={{fontSize:32,marginBottom:7}}>🤖</div><div style={{fontSize:12}}>Premi per ricevere un'analisi finanziaria personalizzata</div></div>)}
+      </Card>
+      {activeIns&&(
+        <Modal title={`${activeIns.emoji} Consiglio AI`} onClose={()=>setActiveIns(null)}>
+          <div style={{background:"rgba(255,255,255,0.03)",borderRadius:9,padding:12,marginBottom:12}}>
+            <div style={{color:T.slate500,fontSize:10,fontWeight:600,marginBottom:3}}>SITUAZIONE</div>
+            <div style={{color:T.slate300,fontSize:12}}>{activeIns.testo}</div>
+            <div style={{color:T.slate600,fontSize:11,marginTop:3}}>{activeIns.pattern} · {activeIns.impatto}</div>
+          </div>
+          {activeIns.loading?<div style={{display:"flex",flexDirection:"column",gap:7}}><Skeleton height={12}/><Skeleton height={12} width="86%"/><Skeleton height={12} width="70%"/></div>:
+          <div style={{background:`rgba(99,102,241,0.06)`,borderRadius:11,padding:14,color:T.slate200,fontSize:13,lineHeight:1.8,whiteSpace:"pre-wrap",borderLeft:`3px solid ${T.indigo}`}}>{activeIns.risposta}</div>}
+        </Modal>
+      )}
+      {scenModal&&(
+        <Modal title="🔮 Scenario Simulator" onClose={()=>setScenModal(false)} width={500}>
+          <div style={{display:"grid",gap:12,marginBottom:18}}>
+            {[
+              {label:`PAC extra mensile (€) — attuale ${fmt(cfg.pac.mensile)}`,key:"pacExtra",min:0,max:2000,step:50},
+              {label:`Riduzione spese (%) — risparmio ${fmt(cfg.stipendio*scen.riduzioneSpese/100)}/mese`,key:"riduzioneSpese",min:0,max:50,step:5},
+              {label:`Rendimento extra (%) — attuale ${cfg.fire.rendimentoAtteso||7}%`,key:"rendExtra",min:0,max:5,step:0.5},
+            ].map(({label,key,min,max,step})=>(
+              <div key={key}>
+                <label style={{color:T.slate400,fontSize:11,display:"block",marginBottom:3}}>{label}</label>
+                <input type="range" min={min} max={max} step={step} value={scen[key]} onChange={e=>setScen(s=>({...s,[key]:Number(e.target.value)}))} style={{width:"100%",accentColor:T.violet}}/>
+                <div style={{textAlign:"right",color:T.violet,fontSize:12,fontWeight:700}}>{key==="pacExtra"?`+${fmt(scen[key])}`:key==="riduzioneSpese"?`-${scen[key]}%`:`+${scen[key]}%`}</div>
+              </div>
+            ))}
+          </div>
+          <button onClick={runScen} style={{...BS,width:"100%",background:`linear-gradient(135deg,${T.violet},${T.indigo})`,marginBottom:14}}>🚀 Calcola Impatto</button>
+          {scenRes&&(
+            <div style={{background:`${T.green}0d`,borderRadius:11,padding:14,border:`1px solid ${T.green}22`}}>
+              <div style={{color:T.green,fontWeight:700,fontSize:13,marginBottom:8}}>✨ Risultato Simulazione</div>
+              {[
+                {l:"Età FIRE attuale",v:`${scenRes.base.etaPensione} anni`,c:T.slate300},
+                {l:"Età FIRE simulata",v:`${scenRes.sim.etaPensione} anni`,c:T.green},
+                {l:"Anni risparmiati",v:scenRes.anniRisp>0?`${scenRes.anniRisp} anni prima! 🎉`:"Scenario invariato",c:T.amber},
+                {l:"Capitale finale",v:fmtK(scenRes.sim.capitaleFinale),c:T.cyan},
+              ].map(({l,v,c})=>(
+                <div key={l} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"5px 0",borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
+                  <span style={{color:T.slate400}}>{l}</span><span style={{color:c,fontWeight:700}}>{v}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
+// CASHFLOW FORECAST
+// ═══════════════════════════════════════════════════════
+function CashflowForecast({cfg,spese}){
+  const fc=useMemo(()=>calcForecast(cfg,spese),[cfg,spese]);
+  const sc=s=>s>cfg.stipendio*0.5?T.green:s>cfg.stipendio*0.2?T.amber:T.red;
+  return(
+    <div style={{display:"grid",gap:18}}>
+      {fc.giornoRischio<25&&(
+        <div style={{background:`${T.red}12`,borderRadius:13,padding:"12px 16px",border:`1px solid ${T.red}38`,display:"flex",alignItems:"center",gap:12,animation:"pulse 2s infinite"}}>
+          <span style={{fontSize:26}}>🚨</span>
+          <div><div style={{color:T.red,fontWeight:700,fontSize:13}}>Rischio Liquidità</div><div style={{color:T.slate400,fontSize:12}}>Con questo ritmo potresti esaurire la liquidità in ~{fc.giornoRischio} giorni</div></div>
+        </div>
+      )}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(128px,1fr))",gap:11}}>
+        <KPICard label="Saldo Attuale" value={fc.saldoOra} color={sc(fc.saldoOra)} sub="liquidità - spese"/>
+        <KPICard label="Tra 30gg" value={fc.saldo30} color={sc(fc.saldo30)}/>
+        <KPICard label="Tra 60gg" value={fc.saldo60} color={sc(fc.saldo60)}/>
+        <KPICard label="Tra 90gg" value={fc.saldo90} color={sc(fc.saldo90)}/>
+      </div>
+      <Card>
+        <h3 style={{margin:"0 0 12px",color:T.slate200,fontFamily:"'DM Serif Display',serif",fontSize:15}}>📈 Proiezione 90 Giorni</h3>
+        <ResponsiveContainer width="100%" height={190}>
+          <AreaChart data={fc.chart}>
+            <defs><linearGradient id="gFC" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={T.cyan} stopOpacity={0.28}/><stop offset="95%" stopColor={T.cyan} stopOpacity={0}/></linearGradient></defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)"/>
+            <XAxis dataKey="periodo" stroke={T.slate600} tick={{fontSize:11}}/>
+            <YAxis stroke={T.slate600} tick={{fontSize:9}} tickFormatter={fmtK} width={52}/>
+            <Tooltip formatter={v=>fmt(v)} contentStyle={TT}/>
+            <ReferenceLine y={500} stroke={T.red} strokeDasharray="4 3" label={{value:"⚠️ 500€",fill:T.red,fontSize:9,position:"insideTopLeft"}}/>
+            <Area type="monotone" dataKey="saldo" stroke={T.cyan} strokeWidth={2} fill="url(#gFC)" name="Saldo"/>
+          </AreaChart>
+        </ResponsiveContainer>
+      </Card>
+      <Card>
+        <h3 style={{margin:"0 0 10px",color:T.slate200,fontFamily:"'DM Serif Display',serif",fontSize:14}}>🔢 Parametri Previsione</h3>
+        {[
+          {l:"Spesa media/giorno",v:fmt(fc.mediaGiornaliera),c:T.red},
+          {l:"Entrate mensili",v:`+${fmt(cfg.stipendio)}`,c:T.green},
+          {l:"PAC mensile",v:`-${fmt(cfg.pac.mensile)}`,c:T.amber},
+          {l:"Saldo fine mese stimato",v:fmt(fc.saldo30),c:sc(fc.saldo30)},
+        ].map(({l,v,c})=>(
+          <div key={l} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"7px 0",borderBottom:"1px solid rgba(255,255,255,0.05)"}}><span style={{color:T.slate400}}>{l}</span><span style={{color:c,fontWeight:600}}>{v}</span></div>
+        ))}
+      </Card>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
+// FIRE SIMULATOR
+// ═══════════════════════════════════════════════════════
+function FIRESimulator({cfg,setCfg}){
+  const[lf,setLf]=useState(cfg.fire||DEF_CFG.fire);
+  const[saved,setSaved]=useState(true);
+  const upd=(k,v)=>{setLf(f=>({...f,[k]:v}));setSaved(false);};
+  const salva=()=>{const n={...cfg,fire:lf};setCfg(n);storage.save("obiettivi",n);setSaved(true);};
+  const result=useMemo(()=>calcFIRE({...cfg,fire:lf}),[lf,cfg]);
+  const pC=result.prob>=80?T.green:result.prob>=60?T.amber:T.red;
+  return(
+    <div style={{display:"grid",gap:18}}>
+      <Card accent={T.violet}>
+        <h3 style={{margin:"0 0 14px",color:T.violet,fontFamily:"'DM Serif Display',serif",fontSize:17}}>🔥 Simulatore FIRE</h3>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+          {[
+            {label:"Età attuale",key:"eta",min:18,max:70,step:1},
+            {label:"Capitale attuale (€)",key:"capitaleAttuale",min:0,max:2000000,step:500},
+            {label:"Versamento mensile (€)",key:"pacMensile",min:0,max:10000,step:50},
+            {label:"Rendimento atteso (%)",key:"rendimentoAtteso",min:1,max:15,step:0.5},
+            {label:"Rendita desiderata (€/m)",key:"renditaDesiderata",min:500,max:10000,step:100},
+            {label:"Safe Withdrawal Rate (%)",key:"swr",min:2,max:6,step:0.5},
+          ].map(({label,key,min,max,step})=>(
+            <div key={key}>
+              <label style={{color:T.slate400,fontSize:11,display:"block",marginBottom:3}}>{label}: <strong style={{color:T.violet}}>{lf[key]}</strong></label>
+              <input type="range" min={min} max={max} step={step} value={lf[key]} onChange={e=>upd(key,Number(e.target.value))} style={{width:"100%",accentColor:T.violet}}/>
+            </div>
+          ))}
+        </div>
+        <button onClick={salva} style={{...BS,marginTop:12,background:`linear-gradient(135deg,${T.violet},${T.indigo})`,padding:"9px 20px",fontSize:13}}>{saved?"✅ Salvato":"💾 Salva parametri"}</button>
+      </Card>
+      <div style={{background:`linear-gradient(135deg,${T.violet}12,${T.indigo}07)`,borderRadius:18,padding:"22px",border:`1px solid ${T.violet}28`,textAlign:"center"}}>
+        <div style={{color:T.slate400,fontSize:10,fontWeight:600,letterSpacing:0.5,textTransform:"uppercase",marginBottom:7}}>Età Pensionamento Stimata</div>
+        <div style={{color:T.violet,fontFamily:"'DM Serif Display',serif",fontSize:52,fontWeight:700,lineHeight:1}}>{result.mesi<600?result.etaPensione:"∞"}</div>
+        <div style={{color:T.slate500,fontSize:13,marginTop:3}}>anni</div>
+        <div style={{display:"flex",justifyContent:"center",gap:10,marginTop:12,flexWrap:"wrap"}}>
+          <Chip color={pC}>🎯 Prob. {result.prob}%</Chip>
+          <Chip color={T.green}>💰 {fmt(result.renditaMensile)}/mese</Chip>
+          <Chip color={T.amber}>🏦 Target: {fmtK(result.capitaleNecessario)}</Chip>
+        </div>
+      </div>
+      {result.milestones&&result.milestones.length>0&&(
+        <Card>
+          <h3 style={{margin:"0 0 12px",color:T.slate200,fontFamily:"'DM Serif Display',serif",fontSize:15}}>🗺️ Milestones FIRE</h3>
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {result.milestones.map((m,i)=>(
+              <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"9px 13px",borderRadius:9,background:m.raggiunto?`${T.green}0d`:"rgba(255,255,255,0.03)",border:`1px solid ${m.raggiunto?T.green:"rgba(255,255,255,0.06)"}`}}>
+                <div style={{width:34,height:34,borderRadius:"50%",background:m.raggiunto?`${T.green}22`:"rgba(255,255,255,0.05)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,flexShrink:0}}>
+                  {m.raggiunto?"✅":["🌱","🌿","🌳","💎","🔥"][i]||"🎯"}
+                </div>
+                <div style={{flex:1}}>
+                  <div style={{color:m.raggiunto?T.green:T.slate300,fontWeight:600,fontSize:13}}>{fmtK(m.target)}</div>
+                  <div style={{color:T.slate600,fontSize:11,marginTop:1}}>{m.raggiunto?"✅ Raggiunto!":`Tra ~${m.anni} anni`}</div>
+                </div>
+                {!m.raggiunto&&<div style={{color:T.violet,fontSize:11,fontWeight:600}}>{m.anni}a →</div>}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+      <Card>
+        <h3 style={{margin:"0 0 12px",color:T.slate200,fontFamily:"'DM Serif Display',serif",fontSize:15}}>📈 Crescita Capitale verso FIRE</h3>
+        <ResponsiveContainer width="100%" height={200}>
+          <AreaChart data={result.chart}>
+            <defs><linearGradient id="gFIRE" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={T.violet} stopOpacity={0.32}/><stop offset="95%" stopColor={T.violet} stopOpacity={0}/></linearGradient></defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)"/>
+            <XAxis dataKey="anno" stroke={T.slate600} tick={{fontSize:9}} tickFormatter={v=>`${v}a`}/>
+            <YAxis stroke={T.slate600} tick={{fontSize:9}} tickFormatter={fmtK} width={55}/>
+            <Tooltip formatter={(v,n)=>[fmtK(v),n==="capitale"?"Capitale":"Obiettivo FIRE"]} contentStyle={TT}/>
+            <Legend formatter={v=>v==="capitale"?"Capitale accumulato":"Obiettivo FIRE 🎯"} wrapperStyle={{fontSize:10,color:T.slate400}}/>
+            <Area type="monotone" dataKey="capitale" stroke={T.violet} strokeWidth={2} fill="url(#gFIRE)" name="capitale"/>
+            <Line type="monotone" dataKey="target" stroke={T.amber} strokeWidth={1.5} dot={false} strokeDasharray="6 3" name="target"/>
+          </AreaChart>
+        </ResponsiveContainer>
+      </Card>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
+// BUDGET PLANNER
+// ═══════════════════════════════════════════════════════
+function BudgetPlanner({cfg,spese}){
+  const budget=useMemo(()=>calcBudget(cfg.stipendio,spese),[cfg.stipendio,spese]);
+  const BRow=({label,data,color,emoji})=>{
+    const pct=data.budget>0?(data.speso/data.budget)*100:0;const over=pct>100;
+    return(
+      <Card>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}><span style={{color:T.slate200,fontWeight:600,fontSize:14}}>{emoji} {label}</span><div><span style={{color:over?T.red:color,fontWeight:700}}>{fmt(data.speso)}</span><span style={{color:T.slate600,fontSize:12}}> / {fmt(data.budget)}</span></div></div>
+        <ProgressBar value={data.speso} max={data.budget} color={over?T.red:color} height={10} showPct/>
+        <div style={{display:"flex",justifyContent:"space-between",marginTop:5,fontSize:11}}>
+          <span style={{color:T.slate600}}>{pct.toFixed(0)}% usato</span>
+          <span style={{color:over?T.red:T.slate500}}>{over?`⚠️ Sforato ${fmt(data.speso-data.budget)}`:`Rimangono ${fmt(data.budget-data.speso)}`}</span>
+        </div>
+      </Card>
+    );
+  };
+  return(
+    <div style={{display:"grid",gap:18}}>
+      <Card accent={T.amber}>
+        <h3 style={{margin:"0 0 5px",color:T.amber,fontFamily:"'DM Serif Display',serif",fontSize:17}}>💰 Regola 50/30/20</h3>
+        <div style={{color:T.slate500,fontSize:12,marginBottom:12}}>Allocazione ottimale su {fmt(cfg.stipendio)}/mese</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:9}}>
+          <KPICard label="Necessità 50%" value={cfg.stipendio*0.5} color={T.red} sub="Casa, cibo, trasporti"/>
+          <KPICard label="Desideri 30%" value={cfg.stipendio*0.3} color={T.amber} sub="Svago, hobby"/>
+          <KPICard label="Risparmio 20%" value={cfg.stipendio*0.2} color={T.green} sub="PAC, fondo"/>
+        </div>
+      </Card>
+      <BRow label="Necessità" data={budget.necessita} color={T.red} emoji="🏠"/>
+      <BRow label="Desideri" data={budget.desideri} color={T.amber} emoji="🎮"/>
+      <BRow label="Risparmio" data={budget.risparmio} color={T.green} emoji="💎"/>
+      <Card>
+        <h3 style={{margin:"0 0 10px",color:T.slate200,fontFamily:"'DM Serif Display',serif",fontSize:14}}>📊 Riepilogo</h3>
+        {[{l:"Totale speso",v:fmt(budget.totale),c:T.red},{l:"Stipendio",v:fmt(cfg.stipendio),c:T.green},{l:"Saldo disponibile",v:fmt(cfg.stipendio-budget.totale),c:cfg.stipendio-budget.totale>=0?T.green:T.red}].map(({l,v,c})=>(
+          <div key={l} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"7px 0",borderBottom:"1px solid rgba(255,255,255,0.05)"}}><span style={{color:T.slate400}}>{l}</span><span style={{color:c,fontWeight:700}}>{v}</span></div>
+        ))}
+      </Card>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
+// ANALISI GRAFICI
+// ═══════════════════════════════════════════════════════
+function GraficiAnalisi({spese}){
+  const anno=new Date().getFullYear(),meseC=new Date().getMonth();
+  const perMese=useMemo(()=>MESI.map((m,i)=>({mese:m,totale:spese.filter(s=>{const d=new Date(s.data);return d.getFullYear()===anno&&d.getMonth()===i;}).reduce((a,s)=>a+s.importo,0)})),[spese,anno]);
+  const perCat=useMemo(()=>CATEGORIE.map((cat,i)=>({name:cat,totale:spese.filter(s=>s.categoria===cat).reduce((a,s)=>a+s.importo,0),fill:COLORS[i]})).filter(c=>c.totale>0),[spese]);
+  const sm=useMemo(()=>spese.filter(s=>{const d=new Date(s.data);return d.getFullYear()===anno&&d.getMonth()===meseC;}).reduce((a,s)=>a+s.importo,0),[spese,anno,meseC]);
+  const sp=useMemo(()=>{const pm=meseC===0?11:meseC-1,py=meseC===0?anno-1:anno;return spese.filter(s=>{const d=new Date(s.data);return d.getFullYear()===py&&d.getMonth()===pm;}).reduce((a,s)=>a+s.importo,0);},[spese,meseC,anno]);
+  const diff=sp?((sm-sp)/sp*100):null;
+  return(
+    <div style={{display:"grid",gap:18}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(128px,1fr))",gap:11}}>
+        <KPICard label="Spese Totali" value={spese.reduce((a,s)=>a+s.importo,0)} color={T.indigo}/>
+        <KPICard label={`${MESI[meseC]} corrente`} value={sm} color={T.cyan} trend={diff}/>
+        <KPICard label="Variazione" value={diff?fmtP(diff):"—"} color={diff>0?T.red:T.green}/>
+      </div>
+      <Card>
+        <h3 style={{margin:"0 0 12px",color:T.slate200,fontFamily:"'DM Serif Display',serif",fontSize:15}}>📅 Spese Mensili {anno}</h3>
+        <ResponsiveContainer width="100%" height={190}>
+          <BarChart data={perMese}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)"/>
+            <XAxis dataKey="mese" stroke={T.slate600} tick={{fontSize:10}}/><YAxis stroke={T.slate600} tick={{fontSize:10}} tickFormatter={v=>`€${v}`}/>
+            <Tooltip formatter={v=>fmt(v)} contentStyle={TT}/><Bar dataKey="totale" fill={T.indigo} radius={[4,4,0,0]} name="Spese"/>
+          </BarChart>
+        </ResponsiveContainer>
+      </Card>
+      {perCat.length>0&&(
+        <Card>
+          <h3 style={{margin:"0 0 12px",color:T.slate200,fontFamily:"'DM Serif Display',serif",fontSize:15}}>🏷️ Per Categoria</h3>
+          <ResponsiveContainer width="100%" height={190}>
+            <BarChart data={perCat} layout="vertical"><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)"/>
+              <XAxis type="number" stroke={T.slate600} tick={{fontSize:10}} tickFormatter={v=>`€${v}`}/>
+              <YAxis type="category" dataKey="name" stroke={T.slate600} tick={{fontSize:10}} width={88}/>
+              <Tooltip formatter={v=>fmt(v)} contentStyle={TT}/>
+              <Bar dataKey="totale" radius={[0,4,4,0]} name="Totale">{perCat.map((c,i)=><Cell key={i} fill={c.fill}/>)}</Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
+// NOTIFICATION CENTER
+// ═══════════════════════════════════════════════════════
+function NotifCenter({cfg,spese,assets,prezzi,onClose}){
+  const oggi=new Date(),mC=oggi.getMonth(),aC=oggi.getFullYear();
+  const sm=spese.filter(s=>{const d=new Date(s.data);return d.getFullYear()===aC&&d.getMonth()===mC;}).reduce((a,s)=>a+s.importo,0);
+  const perc=cfg.stipendio>0?(sm/cfg.stipendio)*100:0;
+  const{total:hs}=calcHealthScore(cfg,spese,assets,prezzi);
+  const notes=[
+    perc>70&&{type:"danger",icon:"🚨",title:"Budget a rischio",body:`Speso il ${perc.toFixed(0)}% dello stipendio. Rimangono ${fmt(cfg.stipendio-sm)}.`},
+    cfg.fondoEmergenza.attuale<cfg.fondoEmergenza.obiettivo&&{type:"info",icon:"🛡️",title:"Fondo emergenza incompleto",body:`Al ${((cfg.fondoEmergenza.attuale/cfg.fondoEmergenza.obiettivo)*100).toFixed(0)}%. Mancano ${fmt(cfg.fondoEmergenza.obiettivo-cfg.fondoEmergenza.attuale)}.`},
+    hs<50&&{type:"warning",icon:"📊",title:"Health score basso",body:`Score ${hs}/100. Vai su AI Advisor per migliorare.`},
+    cfg.pac.mensile===0&&{type:"info",icon:"📈",title:"PAC non attivo",body:"Anche €50/mese fa la differenza nel lungo periodo."},
+    {type:"success",icon:"💎",title:"WealthOS aggiornato",body:"I tuoi dati sono sincronizzati e al sicuro."},
+  ].filter(Boolean);
+  const cols={danger:T.red,warning:T.amber,info:T.cyan,success:T.green};
+  return(
+    <Modal title="🔔 Notifiche" onClose={onClose}>
+      <div style={{display:"flex",flexDirection:"column",gap:9}}>
+        {notes.map((n,i)=>(
+          <div key={i} style={{display:"flex",gap:11,padding:"11px 13px",borderRadius:11,background:`${cols[n.type]}0b`,border:`1px solid ${cols[n.type]}22`}}>
+            <span style={{fontSize:18,flexShrink:0}}>{n.icon}</span>
+            <div><div style={{color:T.slate200,fontWeight:600,fontSize:12}}>{n.title}</div><div style={{color:T.slate500,fontSize:11,marginTop:2}}>{n.body}</div></div>
+          </div>
+        ))}
+      </div>
+    </Modal>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
+// CSS GLOBAL
+// ═══════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════
+// APP ROOT
+// ═══════════════════════════════════════════════════════
+const TABS=[
+  {id:"tracker",   label:"💸 Spese"},
+  {id:"patrimonio",label:"🏦 Patrimonio"},
+  {id:"obiettivi", label:"🎯 Obiettivi"},
+  {id:"portafoglio",label:"📦 Portfolio"},
+  {id:"ai",        label:"🤖 AI Advisor"},
+  {id:"cashflow",  label:"📡 Cashflow"},
+  {id:"fire",      label:"🔥 FIRE"},
+  {id:"budget",    label:"💰 Budget"},
+  {id:"analisi",   label:"📊 Analisi"},
+];
+
+export default function App(){
+  const[tab,setTab]=useState("tracker");
+  const[spese,setSpese]=useState([]);
+  const[cfg,setCfg]=useState(DEF_CFG);
+  const[assets,setAssets]=useState([]);
+  const[prezzi,setPrezzi]=useState({});
+  const[loaded,setLoaded]=useState(false);
+  const[showOnboarding,setShowOnboarding]=useState(false);
+  const[showNotif,setShowNotif]=useState(false);
+  const[toast,setToast]=useState(null);
+
+  useEffect(()=>{
+    Promise.all([
+      storage.load("spese",[]),
+      storage.load("obiettivi",null),
+      storage.load("assets",[]),
+      storage.load("onboarding_done",false),
+    ]).then(([s,o,a,done])=>{
+      setSpese(s);
+      if(o) setCfg({...DEF_CFG,...o,pac:{...DEF_CFG.pac,...(o.pac||{})},fondoEmergenza:{...DEF_CFG.fondoEmergenza,...(o.fondoEmergenza||{})},fire:{...DEF_CFG.fire,...(o.fire||{})}});
+      setAssets(a);
+      if(!done&&s.length===0&&!o) setShowOnboarding(true);
+      setLoaded(true);
+    });
+  },[]);
+
+  const completeOnboarding=useCallback(newCfg=>{
+    setCfg(newCfg);storage.save("obiettivi",newCfg);storage.save("onboarding_done",true);
+    setShowOnboarding(false);setToast({msg:"Profilo creato! Benvenuto in WealthOS 🎉",type:"success"});
+  },[]);
+
+  const{total:hs}=useMemo(()=>calcHealthScore(cfg,spese,assets,prezzi),[cfg,spese,assets,prezzi]);
+  const hsC=hs>=75?T.green:hs>=50?T.amber:hs>=30?T.orange:T.red;
+
+  if(!loaded) return(
+    <div style={{minHeight:"100vh",background:T.slate950,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:18}}>
+      <style>{CSS_GLOBAL}</style>
+      <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+      <div style={{position:"relative",width:60,height:60}}>
+        <div style={{position:"absolute",inset:0,border:`3px solid rgba(99,102,241,0.15)`,borderRadius:"50%"}}/>
+        <div style={{position:"absolute",inset:0,border:`3px solid ${T.indigo}`,borderTopColor:"transparent",borderRadius:"50%",animation:"spin 0.85s linear infinite"}}/>
+        <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>💎</div>
+      </div>
+      <div style={{color:T.indigoL,fontFamily:"'DM Serif Display',serif",fontSize:22,letterSpacing:-0.3}}>WealthOS</div>
+      <div style={{color:T.slate700,fontSize:12}}>Caricamento in corso...</div>
+    </div>
+  );
+
+  if(showOnboarding) return <Onboarding onComplete={completeOnboarding}/>;
+
+  return(
+    <div style={{minHeight:"100vh",background:T.slate900,fontFamily:"'DM Sans',system-ui,sans-serif",color:T.slate200}}>
+      <style>{CSS_GLOBAL}</style>
+      <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+      {toast&&<Toast {...toast} onClose={()=>setToast(null)}/>}
+      {showNotif&&<NotifCenter cfg={cfg} spese={spese} assets={assets} prezzi={prezzi} onClose={()=>setShowNotif(false)}/>}
+
+      {/* HEADER STICKY */}
+      <div style={{background:`linear-gradient(180deg,${T.slate950} 0%,rgba(15,23,42,0.96) 100%)`,borderBottom:"1px solid rgba(99,102,241,0.1)",position:"sticky",top:0,zIndex:100,backdropFilter:"blur(16px)"}}>
+        <div style={{maxWidth:960,margin:"0 auto",padding:"11px 14px 0"}}>
+          <div style={{display:"flex",alignItems:"center",gap:9,marginBottom:9}}>
+            {/* Logo */}
+            <div style={{width:30,height:30,background:`linear-gradient(135deg,${T.indigo},${T.cyan})`,borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,boxShadow:`0 0 14px ${T.indigo}44`,flexShrink:0}}>💎</div>
+            <div style={{flex:1}}>
+              <div style={{display:"flex",alignItems:"baseline",gap:7}}>
+                <span style={{fontFamily:"'DM Serif Display',serif",fontSize:18,background:`linear-gradient(135deg,${T.indigoL},${T.cyan})`,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",fontWeight:700}}>WealthOS</span>
+                <span style={{color:T.slate700,fontSize:10}}>AI Financial Advisor</span>
+              </div>
+            </div>
+            {/* Health score pill */}
+            <div onClick={()=>setTab("ai")} style={{display:"flex",alignItems:"center",gap:5,background:`${hsC}12`,border:`1px solid ${hsC}30`,borderRadius:18,padding:"3px 10px",cursor:"pointer",transition:"all 0.2s"}}>
+              <div style={{width:7,height:7,borderRadius:"50%",background:hsC,boxShadow:`0 0 5px ${hsC}`}}/>
+              <span style={{color:hsC,fontSize:11,fontWeight:700}}>{hs}</span>
+              <span style={{color:T.slate600,fontSize:10}}>/100</span>
+            </div>
+            {/* Bell */}
+            <button onClick={()=>setShowNotif(true)} style={{background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:7,width:30,height:30,color:T.slate400,cursor:"pointer",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",transition:"all 0.2s"}}>🔔</button>
+          </div>
+          {/* Tabs */}
+          <div style={{display:"flex",gap:1,overflowX:"auto",scrollbarWidth:"none",msOverflowStyle:"none"}}>
+            {TABS.map(t=>(
+              <button key={t.id} onClick={()=>setTab(t.id)} style={{
+                background:tab===t.id?"rgba(99,102,241,0.12)":"transparent",
+                border:"none",
+                borderBottom:tab===t.id?`2px solid ${T.indigo}`:"2px solid transparent",
+                borderRadius:"6px 6px 0 0",
+                padding:"7px 11px",
+                color:tab===t.id?T.indigo:T.slate600,
+                fontWeight:tab===t.id?700:400,
+                fontSize:11,
+                cursor:"pointer",
+                transition:"all 0.18s",
+                whiteSpace:"nowrap",
+                fontFamily:"inherit",
+                letterSpacing:0.1,
+              }}>{t.label}</button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* CONTENT */}
+      <div style={{maxWidth:960,margin:"0 auto",padding:"18px 12px 72px",animation:"fadeIn 0.28s ease"}}>
+        {tab==="tracker"    &&<TrackerSpese spese={spese} setSpese={setSpese}/>}
+        {tab==="patrimonio" &&<PatrimonioNetto cfg={cfg} assets={assets} prezzi={prezzi} spese={spese}/>}
+        {tab==="obiettivi"  &&<Obiettivi cfg={cfg} setCfg={setCfg} spese={spese}/>}
+        {tab==="portafoglio"&&<Portafoglio assets={assets} setAssets={setAssets} prezzi={prezzi} setPrezzi={setPrezzi}/>}
+        {tab==="ai"         &&<AIAdvisor cfg={cfg} spese={spese} assets={assets} prezzi={prezzi}/>}
+        {tab==="cashflow"   &&<CashflowForecast cfg={cfg} spese={spese}/>}
+        {tab==="fire"       &&<FIRESimulator cfg={cfg} setCfg={setCfg}/>}
+        {tab==="budget"     &&<BudgetPlanner cfg={cfg} spese={spese}/>}
+        {tab==="analisi"    &&<GraficiAnalisi spese={spese}/>}
+      </div>
+    </div>
+  );
+}
