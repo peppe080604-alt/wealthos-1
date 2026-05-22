@@ -1,1 +1,0 @@
-# wealthos-1
